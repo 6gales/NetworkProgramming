@@ -2,80 +2,84 @@ package ru.nsu.g.apleshkov.udpChat;
 
 import java.io.IOException;
 import java.net.DatagramPacket;
-import java.net.DatagramSocket;
 import java.net.InetAddress;
-import java.net.SocketException;
+import java.net.MulticastSocket;
+import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.util.HashSet;
-import java.util.Map;
+import java.util.LinkedList;
 import java.util.Set;
 
 public class UDPClient
 {
-	private DatagramSocket ds;
 	private InetAddress address;
 	private int port;
+	private int timeout;
 
-	public UDPClient(String ipAddr, int port) throws UnknownHostException, SocketException
+	public UDPClient() throws UnknownHostException
+	{
+		setSettings("224.0.147.117", 8888, 3000);
+	}
+
+	public UDPClient(String ipAddr, int port) throws UnknownHostException
+	{
+		setSettings(ipAddr, port, 3000);
+	}
+
+	public UDPClient(String ipAddr, int port, int timeout) throws UnknownHostException
+	{
+		setSettings(ipAddr, port, timeout);
+	}
+
+	private void setSettings(String ipAddr, int port, int timeout) throws UnknownHostException
 	{
 		this.port = port;
 		address = InetAddress.getByName(ipAddr);
+		this.timeout = timeout;
 
 		if (!address.isMulticastAddress())
 		{
 			System.out.println("Warning, this is not multicast address");
 		}
-
-		ds = new DatagramSocket();
 	}
 
-	void start()
+	void start() throws IOException
 	{
-		String message = "Message from: " + address.getHostAddress() + ":" + port;
+		String message = "Message from " + InetAddress.getLocalHost();
 		byte[] data = message.getBytes();
-		int timeout = 3000;
+//		Set<InetAddress> knownCopies = new HashSet<>();
+		LinkedList<InetAddress> knownCopies = new LinkedList<>();
 
-		for (int i = 0; i < 500; i++)
+		try (MulticastSocket socket = new MulticastSocket(port))
 		{
-			try
-			{
-				DatagramPacket packet = new DatagramPacket(data, data.length, address, port);
-				ds.send(packet);
-			}
-			catch (IOException e)
-			{
-				e.printStackTrace();
-			}
-			Set<InetAddress> set = new HashSet<>();
+			socket.joinGroup(address);
 
-			long start = System.currentTimeMillis(),
-				end = start;
+			while (true)
+			{
+				socket.send(new DatagramPacket(data, data.length, address, port));
 
-			try
-			{
-				ds.setSoTimeout(timeout);
-			}
-			catch (SocketException e)
-			{
-				e.printStackTrace();
-			}
+				long start = System.currentTimeMillis(),
+						end = start;
 
-			while (end - start < timeout)
-			{
-				try
+				do
 				{
-					DatagramPacket packet = new DatagramPacket(new byte[1024], 1024);
-					ds.receive(packet);
-					end = System.currentTimeMillis();
-					set.add(packet.getAddress());
-					System.out.println(new String(packet.getData()));
-					if (end - start < timeout)
-						ds.setSoTimeout(timeout - (int)(end - start));
-				}
-				catch (IOException e)
-				{
-					e.printStackTrace();
-				}
+					try
+					{
+						socket.setSoTimeout(timeout - (int)(end - start));
+
+						DatagramPacket packet = new DatagramPacket(new byte[32], 32);
+						socket.receive(packet);
+						end = System.currentTimeMillis();
+						knownCopies.add(packet.getAddress());
+						System.out.println("Received \"" + new String(packet.getData()) + "\" from " + packet.getAddress().toString());
+					}
+					catch (SocketTimeoutException ignore) {}
+
+					System.out.println("Copies found:");
+					knownCopies.forEach(ia -> System.out.println("|_" + ia));
+					knownCopies.clear();
+
+				} while (end - start < timeout);
 			}
 		}
 	}
