@@ -18,7 +18,7 @@ public class UDPClient
 
 	public UDPClient() throws UnknownHostException
 	{
-		setSettings("224.0.147.117", 8888, 3000);
+		setSettings("224.0.147.0", 8888, 3000);
 	}
 
 	public UDPClient(String ipAddr, int port) throws UnknownHostException
@@ -69,17 +69,16 @@ public class UDPClient
 
 						DatagramPacket packet = new DatagramPacket(new byte[32], 32);
 						socket.receive(packet);
-						end = System.currentTimeMillis();
 						knownCopies.add(packet.getAddress());
 						System.out.println("Received \"" + new String(packet.getData()) + "\" from " + packet.getAddress().toString());
 					}
 					catch (SocketTimeoutException ignore) {}
 
-					System.out.println("Copies found:");
-					knownCopies.forEach(ia -> System.out.println("|_" + ia));
-					knownCopies.clear();
+				} while (System.currentTimeMillis() - start < timeout);
 
-				} while (end - start < timeout);
+				System.out.println("Copies found:");
+				knownCopies.forEach(ia -> System.out.println("|_" + ia));
+				knownCopies.clear();
 			}
 		}
 	}
