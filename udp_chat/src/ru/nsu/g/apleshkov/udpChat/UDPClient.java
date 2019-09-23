@@ -6,9 +6,10 @@ import java.net.InetAddress;
 import java.net.MulticastSocket;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.LinkedList;
-import java.util.Set;
+import java.util.List;
+import java.util.Map;
 
 public class UDPClient
 {
@@ -47,8 +48,13 @@ public class UDPClient
 	{
 		String message = "Message from " + InetAddress.getLocalHost();
 		byte[] data = message.getBytes();
-//		Set<InetAddress> knownCopies = new HashSet<>();
-		LinkedList<InetAddress> knownCopies = new LinkedList<>();
+
+		int buffLen = 128,
+			iterationsToLive = 4;
+
+		byte[] receiveBuff = new byte[buffLen];
+		Map<InetAddress, Integer> knownCopies = new HashMap<>();
+		List<InetAddress> keysForDelete = new LinkedList<>();
 
 		try (MulticastSocket socket = new MulticastSocket(port))
 		{
@@ -67,18 +73,29 @@ public class UDPClient
 					{
 						socket.setSoTimeout(timeout - (int)(end - start));
 
-						DatagramPacket packet = new DatagramPacket(new byte[32], 32);
+						DatagramPacket packet = new DatagramPacket(receiveBuff, buffLen);
 						socket.receive(packet);
-						knownCopies.add(packet.getAddress());
-						System.out.println("Received \"" + new String(packet.getData()) + "\" from " + packet.getAddress().toString());
+						knownCopies.put(packet.getAddress(), 0);
+						System.out.println("Received \"" + new String(packet.getData()).trim() + "\" from " + packet.getAddress().toString());
 					}
 					catch (SocketTimeoutException ignore) {}
 
 				} while (System.currentTimeMillis() - start < timeout);
 
-				System.out.println("Copies found:");
-				knownCopies.forEach(ia -> System.out.println("|_" + ia));
-				knownCopies.clear();
+				System.out.println(knownCopies.size() + " copies detected");
+				knownCopies.forEach((InetAddress addr, Integer i) ->
+				{
+					if (++i > iterationsToLive)
+						keysForDelete.add(addr);
+					else
+					{
+						System.out.println("Copy: " + addr + ", Last seen " + i + " iterations ago");
+						knownCopies.put(addr, i);
+					}
+				});
+
+				keysForDelete.forEach(knownCopies::remove);
+				keysForDelete.clear();
 			}
 		}
 	}
