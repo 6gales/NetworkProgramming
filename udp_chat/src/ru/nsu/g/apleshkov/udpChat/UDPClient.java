@@ -5,7 +5,6 @@ import java.net.DatagramPacket;
 import java.net.InetAddress;
 import java.net.MulticastSocket;
 import java.net.SocketTimeoutException;
-import java.net.UnknownHostException;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -13,39 +12,31 @@ import java.util.Map;
 
 public class UDPClient
 {
-	private InetAddress address;
+	private String hostname;
 	private int port;
 	private int timeout;
 
-	public UDPClient() throws UnknownHostException
+	public UDPClient()
 	{
-		setSettings("224.0.147.0", 8888, 3000);
+		this("224.0.147.0", 8888, 3000);
 	}
 
-	public UDPClient(String ipAddr, int port) throws UnknownHostException
+	public UDPClient(String ipAddr, int port)
 	{
-		setSettings(ipAddr, port, 3000);
+		this(ipAddr, port, 3000);
 	}
 
-	public UDPClient(String ipAddr, int port, int timeout) throws UnknownHostException
-	{
-		setSettings(ipAddr, port, timeout);
-	}
-
-	private void setSettings(String ipAddr, int port, int timeout) throws UnknownHostException
+	public UDPClient(String ipAddr, int port, int timeout)
 	{
 		this.port = port;
-		address = InetAddress.getByName(ipAddr);
+		hostname = ipAddr;
 		this.timeout = timeout;
-
-		if (!address.isMulticastAddress())
-		{
-			System.out.println("Warning, this is not multicast address");
-		}
 	}
 
 	void start() throws IOException
 	{
+		InetAddress address = InetAddress.getByName(hostname);
+
 		String message = "Message from " + InetAddress.getLocalHost();
 		byte[] data = message.getBytes();
 

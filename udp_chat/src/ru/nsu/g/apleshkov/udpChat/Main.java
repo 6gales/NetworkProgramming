@@ -4,7 +4,7 @@ import java.io.IOException;
 
 public class Main
 {
-	public static void main(String[] args) throws IOException
+	public static void main(String[] args)
 	{
 		UDPClient client;
 		if (args.length == 0 || args.length == 1 && args[0].equals("--default"))
@@ -25,6 +25,13 @@ public class Main
 			return;
 		}
 
-		client.start();
+		try
+		{
+			client.start();
+		}
+		catch (IOException e)
+		{
+			e.printStackTrace();
+		}
 	}
 }
