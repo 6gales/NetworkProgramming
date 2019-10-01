@@ -67,11 +67,12 @@ public class UDPClient
 						DatagramPacket packet = new DatagramPacket(receiveBuff, buffLen);
 						socket.receive(packet);
 						knownCopies.put(packet.getAddress(), 0);
+						end = System.currentTimeMillis();
 						System.out.println("Received \"" + new String(packet.getData()).trim() + "\" from " + packet.getAddress().toString());
 					}
 					catch (SocketTimeoutException ignore) {}
 
-				} while (System.currentTimeMillis() - start < timeout);
+				} while (end - start < timeout);
 
 				System.out.println(knownCopies.size() + " copies detected");
 				knownCopies.forEach((InetAddress addr, Integer i) ->
