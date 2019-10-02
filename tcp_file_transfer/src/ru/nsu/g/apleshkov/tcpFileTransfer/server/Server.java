@@ -1,16 +1,29 @@
 package ru.nsu.g.apleshkov.tcpFileTransfer.server;
 
 import java.io.File;
+import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 
 public class Server
 {
-	private int port;
+	private int port,
+				timeout;
 	private String uploadFolder = "uploads";
 
-	public Server(int port)
+	public Server()
 	{
+		this(3000, 8080);
+	}
+
+	public Server(int timeout)
+	{
+		this(timeout, 8080);
+	}
+
+	public Server(int timeout, int port)
+	{
+		this.timeout = timeout;
 		this.port = port;
 	}
 
@@ -23,11 +36,12 @@ public class Server
 
 		try (ServerSocket serverSocket = new ServerSocket(port))
 		{
+			System.out.println("Listening " + InetAddress.getLocalHost().getHostAddress() + ":" + serverSocket.getLocalPort());
 			while (true)
 			{
 				Socket socket = serverSocket.accept();
 				System.out.println("New user connected: " + socket.getInetAddress());
-				new UserThread(socket, uploadFolder + "/", 3000).start();
+				new UserThread(socket, uploadFolder + "/", timeout).start();
 			}
 		}
 	}

@@ -104,7 +104,7 @@ public class UserThread extends Thread
 				} catch (SocketTimeoutException ignore) {}
 
 				System.out.println(socket.getInetAddress()
-						                   + ":\n\tCurrent speed: " + partialLen / 3.0 + " b/s"
+						                   + ":\n\tCurrent speed: " + partialLen / (timeout / 1000.0) + " b/s"
 						                   + "\n\tAverage speed: "
 						                   + readLen / ((System.currentTimeMillis() - downloadStart) / 1000.0) + " b/s");
 			}
