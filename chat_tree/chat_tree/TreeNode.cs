@@ -12,9 +12,9 @@ namespace СhatTree
 {
 	class TreeNode
 	{
-		private string _name;
-		private int _port;
-		private int _lossRate;
+		private readonly string _name;
+		private readonly int _port;
+		private readonly int _lossRate;
 		private BinaryFormatter _formatter;
 		private IPEndPoint _parentIP = null;
 		private HashSet<IPEndPoint> _childs;
@@ -44,14 +44,16 @@ namespace СhatTree
 			_formatter.Serialize(data, message);
 			return data.ToArray();
 		}
-		//private async Task<string> GetInputAsync()
-		//{
-		//	return Task.Run(() => Console.ReadLine());
-		//}
+
 		private void SendMessage<T>(Message<T> message, UdpClient udpClient, IPEndPoint endPoint)
 		{
 			byte[] bytes = SerializeMessage(message);
 			udpClient.Send(bytes, bytes.Length, endPoint);
+		}
+
+		private async Task<string> GetLineAsync()
+		{
+			return await Task.Run(() => Console.ReadLine());
 		}
 
 		public void Run()
@@ -69,16 +71,13 @@ namespace СhatTree
 			{
 				udpClient.Client.ReceiveTimeout = 300;
 				IPEndPoint remoteIpEndPoint = null;
-				Task<string> readLine;
+				Task<string> readLine = GetLineAsync();
 
 				while (true)
 				{
-					readLine = Task.Run(() => Console.ReadLine());
-
 					if (readLine.IsCompleted)
 					{
 						Message<string> message = new Message<string>(_name, ContentType.Data, readLine.Result);
-
 						byte[] bytes = SerializeMessage(message);
 						foreach (var ipQueuedMessages in endPointsQueues)
 						{
