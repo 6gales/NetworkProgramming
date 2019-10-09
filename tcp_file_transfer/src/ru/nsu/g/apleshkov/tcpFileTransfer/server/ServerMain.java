@@ -23,6 +23,7 @@ public class ServerMain
 		try
 		{
 			Server server = createFromParams.get(args.length).call();
+			createFromParams.clear();
 			server.run();
 		}
 		catch (Exception e)
