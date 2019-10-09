@@ -65,7 +65,12 @@ namespace СhatTree
 			HashSet<Guid> messageHistory = new HashSet<Guid>();
 			var endPointsQueues = new Dictionary<IPEndPoint, QueuedMessages>();
 			if (_parentIP != null)
+			{
 				endPointsQueues.Add(_parentIP, new QueuedMessages());
+				Message<object> message = new Message<object>(_name, ContentType.ConnectionRequest, null);
+				byte[] bytes = SerializeMessage(message);
+				endPointsQueues[_parentIP].Add(message.GuidProperty, bytes);
+			}
 
 			using (UdpClient udpClient = new UdpClient(_port))
 			{
