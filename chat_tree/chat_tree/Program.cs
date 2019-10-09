@@ -18,6 +18,7 @@ namespace СhatTree
 			
 			if (!createFromParams.ContainsKey(args.Length))
 			{
+				Console.WriteLine("Usage: <name> <loss rate> <port to bind> <parent node ip> <parent node port>")
 				return;
 			}
 			
