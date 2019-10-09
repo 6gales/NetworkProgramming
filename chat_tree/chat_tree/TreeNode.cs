@@ -77,6 +77,7 @@ namespace СhatTree
 				{
 					if (readLine.IsCompleted)
 					{
+						Console.WriteLine(">>Read line");
 						Message<string> message = new Message<string>(_name, ContentType.Data, readLine.Result);
 						byte[] bytes = SerializeMessage(message);
 						foreach (var ipQueuedMessages in endPointsQueues)
@@ -89,7 +90,7 @@ namespace СhatTree
 					try
 					{
 						byte[] receivedBytes = udpClient.Receive(ref remoteIpEndPoint);
-
+						Console.WriteLine(">>Recieved some: ");
 						if (rng.Next(100) < _lossRate)
 						{
 							Console.Out.WriteLine("Lost message from {1}", remoteIpEndPoint);
@@ -97,6 +98,7 @@ namespace СhatTree
 						}
 
 						Message<object> message = (Message<object>)_formatter.Deserialize(new MemoryStream(receivedBytes));
+						Console.WriteLine(message);
 
 						switch (message.Type)
 						{
