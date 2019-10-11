@@ -98,11 +98,11 @@ namespace СhatTree
 						Console.WriteLine(">>Recieved some: ");
 						if (rng.Next(100) < _lossRate)
 						{
-							Console.Out.WriteLine("Lost message from {1}", remoteIpEndPoint);
+							Console.Out.WriteLine("Lost message from {0}", remoteIpEndPoint);
 							continue;
 						}
 
-						Message<object> message = (Message<object>)_formatter.Deserialize(new MemoryStream(receivedBytes));
+						IMessage<object> message = (IMessage<object>)_formatter.Deserialize(new MemoryStream(receivedBytes));
 						Console.WriteLine(message);
 
 						switch (message.Type)
@@ -117,7 +117,7 @@ namespace СhatTree
 
 								if (childsReserve != null)
 								{
-									Message<IPEndPoint> reserveNodeMessage = new Message<IPEndPoint>(_name, ContentType.ReserveNode, childsReserve);
+									var reserveNodeMessage = new Message<IPEndPointWrapper>(_name, ContentType.ReserveNode, new IPEndPointWrapper(childsReserve));
 									byte[] data = SerializeMessage(reserveNodeMessage);
 									endPointsQueues[remoteIpEndPoint].Add(reserveNodeMessage.GuidProperty, data);
 								}
@@ -129,7 +129,7 @@ namespace СhatTree
 								break;
 
 							case ContentType.ReceptionConfirmation:
-								Guid confirmedID = (Guid)message.Content;
+								Guid confirmedID = ((IMessage<Guid>)message).Content;
 								endPointsQueues[remoteIpEndPoint].Remove(confirmedID);
 								break;
 
@@ -148,7 +148,7 @@ namespace СhatTree
 								break;
 
 							case ContentType.ReserveNode:
-								reserveNode = (IPEndPoint)message.Content;
+								reserveNode = ((IMessage<IPEndPointWrapper>)message).Content.GetIPEndPoint();
 								ConfirmReception(message.GuidProperty, udpClient, remoteIpEndPoint);
 								break;
 						}
@@ -179,7 +179,7 @@ namespace СhatTree
 							}
 							else childsReserve = _parentIP;
 
-							Message<IPEndPoint> reserveNodeMessage = new Message<IPEndPoint>(_name, ContentType.ReserveNode, childsReserve);
+							var reserveNodeMessage = new Message<IPEndPointWrapper>(_name, ContentType.ReserveNode, new IPEndPointWrapper(childsReserve));
 							byte[] data = SerializeMessage(reserveNodeMessage);
 							foreach (var child in _childs)
 							{

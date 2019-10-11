@@ -5,7 +5,7 @@ namespace ChatTree.MessageUtils
 	public enum ContentType { ConnectionRequest, Data, ReserveNode, ReceptionConfirmation }
 
 	[Serializable]
-	class Message<T>
+	class Message<T> : IMessage<T>
 	{
 		public string Name { get; }
 
