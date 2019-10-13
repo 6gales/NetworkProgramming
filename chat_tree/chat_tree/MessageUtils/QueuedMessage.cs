@@ -3,37 +3,45 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace ChatTree.MessageUtils
 {
 	class QueuedMessages
 	{
-		public int UnavailableFor { get; private set; }
-
-		Dictionary<Guid, byte[]> _messageToDeliver;
-
-		public QueuedMessages()
+		class DataSendingTime
 		{
-			UnavailableFor = 0;
-			_messageToDeliver = new Dictionary<Guid, byte[]>();
+			internal long Millis { get; set; }
+
+			internal byte[] Data { get; set; }
 		}
 
-		public void DiscardAttempts() => UnavailableFor = 0;
+		public long LastSeenMillis { get; private set; }
+		private readonly long _resendTimeout;
 
-		public void Add(Guid guid, byte[] buffer) => _messageToDeliver.Add(guid, buffer);
+		Dictionary<Guid, DataSendingTime> _messageToDeliver;
+
+		public QueuedMessages(long resendTimeout)
+		{
+			_resendTimeout = resendTimeout;
+			LastSeenMillis = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+			_messageToDeliver = new Dictionary<Guid, DataSendingTime>();
+		}
+
+		public void UpdateLastSeen() => LastSeenMillis = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+
+		public void Add(Guid guid, byte[] buffer) => _messageToDeliver.Add(guid, new DataSendingTime { Millis= 0, Data= buffer });
 
 		public void Remove(Guid guid) => _messageToDeliver.Remove(guid);
 
-		public void SendAll(IPEndPoint receiver, UdpClient udpClient)
+		public void ResendAll(IPEndPoint receiver, UdpClient udpClient)
 		{
-			if (_messageToDeliver.Count > 0)
-				UnavailableFor++;
+			long now = DateTimeOffset.Now.ToUnixTimeMilliseconds();
 
-			foreach (var message in _messageToDeliver)
+			foreach (var rawMessage in _messageToDeliver
+				.Where(rawMessage  => now - rawMessage.Value.Millis > _resendTimeout))
 			{
-				udpClient.Send(message.Value, message.Value.Length, receiver);
+				rawMessage.Value.Millis = now;
+				udpClient.Send(rawMessage.Value.Data, rawMessage.Value.Data.Length, receiver);
 			}
 		}
 	}

@@ -1,9 +1,5 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Net;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace ChatTree.MessageUtils
 {
@@ -20,12 +16,7 @@ namespace ChatTree.MessageUtils
 		{
 			_host = endPoint.Address.ToString();
 			_port = endPoint.Port;
-		}
-
-		public IPEndPointWrapper(string host, int port)
-		{
-			_host = host;
-			_port = port;
+			_endPoint = endPoint;
 		}
 
 		public IPEndPoint GetIPEndPoint()

@@ -1,11 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
-using System.Runtime.Serialization.Formatters.Binary;
 using System.Threading.Tasks;
+using ChatTree;
 using ChatTree.MessageUtils;
 
 namespace СhatTree
@@ -15,40 +14,40 @@ namespace СhatTree
 		private readonly string _name;
 		private readonly int _port;
 		private readonly int _lossRate;
-		private BinaryFormatter _formatter;
+		private readonly long _resendTimeout = 1500L;
+		private readonly long _maxUnavilableTimeout = 10000L;
+
 		private IPEndPoint _parentIP = null;
+		private IPEndPoint _reserveNode = null;
+		private IPEndPoint _childsReserve;
 		private HashSet<IPEndPoint> _childs;
+
+		private HashSet<Guid> _messageHistory;
+
+		private delegate void Display();
+		private Dictionary<string, Display> _consoleCommands;
 
 		public TreeNode(string name, int loss, int port) : this(name, loss, port, null, 0) { }
 
 		public TreeNode(string name, int lossRate, int port, string parentAddr, int parentPort)
 		{
-			_formatter = new BinaryFormatter();
-			_childs = new HashSet<IPEndPoint>();
 			_name = name;
 			_lossRate = lossRate;
 			_port = port;
+
 			if (parentAddr != null)
 				_parentIP = new IPEndPoint(IPAddress.Parse(parentAddr), parentPort);
-		}
 
-		private void ConfirmReception(Guid guid, UdpClient udpClient, IPEndPoint endPoint)
-		{
-			Message<Guid> confirmation = new Message<Guid>(_name, ContentType.ReceptionConfirmation, guid);
-			SendMessage(confirmation, udpClient, endPoint);
-		}
+			_childsReserve = _parentIP;
 
-		private byte[] SerializeMessage<T>(Message<T> message)
-		{
-			MemoryStream data = new MemoryStream();
-			_formatter.Serialize(data, message);
-			return data.ToArray();
-		}
+			_childs = new HashSet<IPEndPoint>();
+			_messageHistory = new HashSet<Guid>();
 
-		private void SendMessage<T>(Message<T> message, UdpClient udpClient, IPEndPoint endPoint)
-		{
-			byte[] bytes = SerializeMessage(message);
-			udpClient.Send(bytes, bytes.Length, endPoint);
+			_consoleCommands = new Dictionary<string, Display>()
+			{
+				["/nodeMap"] = () => Console.WriteLine("Showing node map:\n\tParent: {_parentIP}"
+														+ "\n\tChilds: { _childs}")
+			};
 		}
 
 		private async Task<string> GetLineAsync()
@@ -56,143 +55,135 @@ namespace СhatTree
 			return await Task.Run(() => Console.ReadLine());
 		}
 
-		public void Run()
+		private void HandleUserInput(string line, MessageManager manager)
 		{
-			int maxFailedAttempts = 10;
-			IPEndPoint reserveNode = null,
-				childsReserve = _parentIP;
-			Random rng = new Random();
-			HashSet<Guid> messageHistory = new HashSet<Guid>();
-			var endPointsQueues = new Dictionary<IPEndPoint, QueuedMessages>();
-			if (_parentIP != null)
+			if (_consoleCommands.ContainsKey(line))
 			{
-				endPointsQueues.Add(_parentIP, new QueuedMessages());
-				Message<object> message = new Message<object>(_name, ContentType.ConnectionRequest, null);
-				byte[] bytes = SerializeMessage(message);
-				endPointsQueues[_parentIP].Add(message.GuidProperty, bytes);
+				_consoleCommands[line].Invoke();
+				return;
 			}
 
+			DataMessage message = new DataMessage(_name, line);
+			manager.SendToAll(message);
+		}
+
+		public void Run()
+		{
 			using (UdpClient udpClient = new UdpClient(_port))
 			{
-				udpClient.Client.ReceiveTimeout = 300;
-				IPEndPoint remoteIpEndPoint = null;
+				MessageManager manager = new MessageManager(udpClient, _name, _resendTimeout);
+
+				if (_parentIP != null)
+				{
+					manager.ConnectTo(_parentIP);
+				}
+
+				udpClient.Client.ReceiveTimeout = 500;
+				
 				Task<string> readLine = GetLineAsync();
 
 				while (true)
 				{
-					if (readLine.IsCompleted)
-					{
-						Console.WriteLine(">>Read line");
-						Message<string> message = new Message<string>(_name, ContentType.Data, readLine.Result);
-						byte[] bytes = SerializeMessage(message);
-						foreach (var ipQueuedMessages in endPointsQueues)
-						{
-							ipQueuedMessages.Value.Add(message.GuidProperty, bytes);
-						}
-						readLine = Task.Run(() => Console.ReadLine());
-					}
+					long start = DateTimeOffset.Now.ToUnixTimeMilliseconds();
 
-					try
+					while (DateTimeOffset.Now.ToUnixTimeMilliseconds() - start < _resendTimeout)
 					{
-						byte[] receivedBytes = udpClient.Receive(ref remoteIpEndPoint);
-						Console.WriteLine(">>Recieved some: ");
-						if (rng.Next(100) < _lossRate)
+						if (readLine.IsCompleted)
 						{
-							Console.Out.WriteLine("Lost message from {0}", remoteIpEndPoint);
+							HandleUserInput(readLine.Result, manager);
+							readLine = Task.Run(() => Console.ReadLine());
+						}
+
+						IPEndPoint sender;
+						Message message = manager.TryReceiveMessage(_lossRate, out sender);
+						if (message == null)
 							continue;
-						}
 
-						IMessage<object> message = (IMessage<object>)_formatter.Deserialize(new MemoryStream(receivedBytes));
+						AnswerMessage(manager, message, sender);
+					}
+
+					RemoveAndReelectNodes(manager);
+					manager.Resend();
+				}
+			}
+		}
+		
+		void AnswerMessage(MessageManager manager, Message message, IPEndPoint sender)
+		{
+			switch (message.Type)
+			{
+				case ContentType.ConnectionRequest: //accept connection
+					if (!_childs.Contains(sender))
+					{
+						_childs.Add(sender);
+						manager.Add(sender);
+					}
+
+					if (_childsReserve != null)
+					{
+						manager.SendToOne(new ReserveNodeMessage(_name, _childsReserve), sender);
+					}
+					else
+					{
+						//if node has no parent, elect first child as reserve node
+						_childsReserve = _childs.First();
+					}
+
+					manager.ConfirmReception(message.GuidProperty, sender);
+					break;
+
+				case ContentType.ReceptionConfirmation:
+					Guid confirmedID = ((ConfirmationMessage)message).ConfirmedGuid;
+					manager.MessageConfirmed(sender, confirmedID);
+					break;
+
+				case ContentType.Data: //send to all, if received first time
+					if (!_messageHistory.Contains(message.GuidProperty))
+					{
+						_messageHistory.Add(message.GuidProperty);
 						Console.WriteLine(message);
-
-						switch (message.Type)
-						{
-							case ContentType.ConnectionRequest:
-								if (!_childs.Contains(remoteIpEndPoint))
-								{
-									_childs.Add(remoteIpEndPoint);
-									endPointsQueues.Add(remoteIpEndPoint, new QueuedMessages());
-								}
-								ConfirmReception(message.GuidProperty, udpClient, remoteIpEndPoint);
-
-								if (childsReserve != null)
-								{
-									var reserveNodeMessage = new Message<IPEndPointWrapper>(_name, ContentType.ReserveNode, new IPEndPointWrapper(childsReserve));
-									byte[] data = SerializeMessage(reserveNodeMessage);
-									endPointsQueues[remoteIpEndPoint].Add(reserveNodeMessage.GuidProperty, data);
-								}
-								else if (_childs.Count > 0)
-								{
-									childsReserve = _childs.First();
-								}
-
-								break;
-
-							case ContentType.ReceptionConfirmation:
-								Guid confirmedID = ((IMessage<Guid>)message).Content;
-								endPointsQueues[remoteIpEndPoint].Remove(confirmedID);
-								break;
-
-							case ContentType.Data:
-								if (!messageHistory.Contains(message.GuidProperty))
-								{
-									messageHistory.Add(message.GuidProperty);
-									Console.WriteLine(message);
-									foreach (var ipQueuedMessages in endPointsQueues)
-									{
-										if (ipQueuedMessages.Key != remoteIpEndPoint)
-											ipQueuedMessages.Value.Add(message.GuidProperty, receivedBytes);
-									}
-								}
-								ConfirmReception(message.GuidProperty, udpClient, remoteIpEndPoint);
-								break;
-
-							case ContentType.ReserveNode:
-								reserveNode = ((IMessage<IPEndPointWrapper>)message).Content.GetIPEndPoint();
-								ConfirmReception(message.GuidProperty, udpClient, remoteIpEndPoint);
-								break;
-						}
-
-						endPointsQueues[remoteIpEndPoint].DiscardAttempts();
+						manager.SendToAllExclude(message, sender);
 					}
-					catch (SocketException) { } //ignore timeout
+					manager.ConfirmReception(message.GuidProperty, sender);
+					break;
 
-					var itemsToRemove = endPointsQueues.Where(pair => pair.Value.UnavailableFor > maxFailedAttempts).ToArray();
-					foreach (var item in itemsToRemove)
-					{
-						endPointsQueues.Remove(item.Key);
-						if (_parentIP != null && _parentIP == item.Key)
-						{
-							_parentIP = reserveNode;
-							Message<object> message = new Message<object>(_name, ContentType.ConnectionRequest, null);
-							byte[] bytes = SerializeMessage(message);
-							endPointsQueues.Add(reserveNode, new QueuedMessages());
-							endPointsQueues[reserveNode].Add(message.GuidProperty, bytes);
-						}
-						else _childs.Remove(item.Key);
+				case ContentType.ReserveNode: //update reserve node
+					_reserveNode = ((ReserveNodeMessage)message).ReserveNode.GetIPEndPoint();
+					manager.ConfirmReception(message.GuidProperty, sender);
+					break;
+			}
 
-						if (childsReserve == item.Key)
-						{
-							if (_parentIP == null)
-							{
-								childsReserve = _childs.First();
-							}
-							else childsReserve = _parentIP;
+		}
+		
+		private void RemoveAndReelectNodes(MessageManager manager)
+		{
+			var itemsToRemove = manager.GetUnavailableNodes(_maxUnavilableTimeout).ToList();
 
-							var reserveNodeMessage = new Message<IPEndPointWrapper>(_name, ContentType.ReserveNode, new IPEndPointWrapper(childsReserve));
-							byte[] data = SerializeMessage(reserveNodeMessage);
-							foreach (var child in _childs)
-							{
-								if (child != childsReserve)
-									endPointsQueues[child].Add(reserveNodeMessage.GuidProperty, data);
-							}
-						}
-					}
+			foreach (var item in itemsToRemove)
+			{
+				manager.RemoveNode(item.Key);
+				if (item.Key == _parentIP)
+				{
+					_parentIP = _reserveNode;
+		
+					if (_reserveNode != null)
+						manager.ConnectTo(_reserveNode);
+				}
+				else
+				{
+					_childs.Remove(item.Key);
+				}
 
-					foreach (var ipQueuedMessages in endPointsQueues)
-					{
-						ipQueuedMessages.Value.SendAll(ipQueuedMessages.Key, udpClient);
-					}
+				if (item.Key == _childsReserve)
+				{
+					
+					_childsReserve = _parentIP ?? (_childs.Count > 0 ? _childs.First() : null);
+
+					if (_childsReserve == null)
+						continue;
+				
+					var reserveNodeMessage = new ReserveNodeMessage(_name, _childsReserve);
+					manager.SendToAllExclude(reserveNodeMessage, _childsReserve);
 				}
 			}
 		}
