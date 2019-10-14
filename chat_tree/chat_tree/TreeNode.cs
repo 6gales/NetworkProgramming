@@ -17,6 +17,8 @@ namespace СhatTree
 		private readonly long _resendTimeout = 1500L;
 		private readonly long _maxUnavilableTimeout = 10000L;
 
+		private bool _notExited = true;
+
 		private IPEndPoint _parentIP = null;
 		private IPEndPoint _reserveNode = null;
 		private IPEndPoint _childsReserve;
@@ -36,18 +38,27 @@ namespace СhatTree
 			_port = port;
 
 			if (parentAddr != null)
+			{
 				_parentIP = new IPEndPoint(IPAddress.Parse(parentAddr), parentPort);
+			}
 
 			_childsReserve = _parentIP;
 
 			_childs = new HashSet<IPEndPoint>();
 			_messageHistory = new HashSet<Guid>();
 
+			IEnumerable<IPAddress> addresses = Dns.GetHostAddresses(Dns.GetHostName())
+					.Where(addr => addr.AddressFamily == AddressFamily.InterNetwork);
+
+			string strAddressses = "Local addresses: " + string.Join(",\n\t ", addresses);
+
 			_consoleCommands = new Dictionary<string, Display>()
 			{
 				["/parent"] = () => Console.WriteLine("Parent: {0}", _parentIP),
-				["/childs"] = () => Console.WriteLine("Childs: {" + string.Join(", ", _childs) + "}")
-		};
+				["/childs"] = () => Console.WriteLine("Childs: {" + string.Join(", ", _childs) + "}"),
+				["/exit"] = () => _notExited = false,
+				["/localAddr"] = () => Console.WriteLine(strAddressses)
+			};
 		}
 
 		private async Task<string> GetLineAsync()
@@ -82,7 +93,7 @@ namespace СhatTree
 				
 				Task<string> readLine = GetLineAsync();
 
-				while (true)
+				while (_notExited)
 				{
 					long start = DateTimeOffset.Now.ToUnixTimeMilliseconds();
 
@@ -117,16 +128,16 @@ namespace СhatTree
 					{
 						_childs.Add(sender);
 						manager.Add(sender);
-					}
 
-					if (_childsReserve != null)
-					{
-						manager.SendToOne(new ReserveNodeMessage(_name, _childsReserve), sender);
-					}
-					else
-					{
-						//if node has no parent, elect first child as reserve node
-						_childsReserve = _childs.First();
+						if (_childsReserve != null)
+						{
+							manager.SendToOne(new ReserveNodeMessage(_name, _childsReserve), sender);
+						}
+						else
+						{
+							//if node has no parent, elect first child as reserve node
+							_childsReserve = _childs.First();
+						}
 					}
 
 					manager.ConfirmReception(message.GuidProperty, sender);
@@ -141,7 +152,7 @@ namespace СhatTree
 					if (!_messageHistory.Contains(message.GuidProperty))
 					{
 						_messageHistory.Add(message.GuidProperty);
-						Console.WriteLine(message);
+						Console.WriteLine("@{0}: {1}", message.Name, ((DataMessage)message).Data);
 						manager.SendToAllExclude(message, sender);
 					}
 					manager.ConfirmReception(message.GuidProperty, sender);
@@ -163,7 +174,7 @@ namespace СhatTree
 			{
 				Console.WriteLine(">>> " + item.Key + " is unavailable");
 				manager.RemoveNode(item.Key);
-				if (item.Key == _parentIP)
+				if (item.Key.Equals(_parentIP))
 				{
 					_parentIP = _reserveNode;
 		
@@ -175,7 +186,7 @@ namespace СhatTree
 					_childs.Remove(item.Key);
 				}
 
-				if (item.Key == _childsReserve)
+				if (item.Key.Equals(_childsReserve))
 				{
 					
 					_childsReserve = _parentIP ?? (_childs.Count > 0 ? _childs.First() : null);

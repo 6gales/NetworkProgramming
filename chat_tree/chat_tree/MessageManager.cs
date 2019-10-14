@@ -72,7 +72,7 @@ namespace ChatTree
 		{
 			byte[] buffer = SerializeMessage(message);
 
-			foreach (var ipQueuedMessages in _endPointsQueues.Where(ip => ip.Key != excluded))
+			foreach (var ipQueuedMessages in _endPointsQueues.Where(ip => !excluded.Equals(ip.Key)))
 			{
 				_udpClient.Send(buffer, buffer.Length, ipQueuedMessages.Key);
 				ipQueuedMessages.Value.Add(message.GuidProperty, buffer);
