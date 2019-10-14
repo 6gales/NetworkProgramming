@@ -82,7 +82,8 @@ namespace ChatTree
 		public IEnumerable<KeyValuePair<IPEndPoint, QueuedMessages>> GetUnavailableNodes(long maxUnavilableTimeout)
 		{
 			long now = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-			return _endPointsQueues.Where(pair => now - pair.Value.LastSeenMillis > maxUnavilableTimeout);
+			return _endPointsQueues.Where(pair => 
+				now - pair.Value.LastSeenMillis > maxUnavilableTimeout && pair.Value.Count() > 0);
 		}
 
 		public void RemoveNode(IPEndPoint endPoint)
@@ -110,24 +111,26 @@ namespace ChatTree
 
 		public Message TryReceiveMessage(int lossRate, out IPEndPoint sender)
 		{
+			sender = null;
 			try
 			{
-				IPEndPoint remoteIpEndPoint = null;
-				byte[] receivedBytes = _udpClient.Receive(ref remoteIpEndPoint);
+				byte[] receivedBytes = _udpClient.Receive(ref sender);
 
 				if (_rng.Next(100) < lossRate)
 				{
-					Console.WriteLine("Lost message from " + remoteIpEndPoint);
-					sender = remoteIpEndPoint;
+					Console.WriteLine(">>> Lost message from " + sender);
 					return null;
 				}
 
 				Message message = (Message)_formatter.Deserialize(new MemoryStream(receivedBytes));
-				_endPointsQueues[remoteIpEndPoint].UpdateLastSeen();
+				
+				if (_endPointsQueues.ContainsKey(sender))
+					_endPointsQueues[sender].UpdateLastSeen();
+				
+				return message;
 			}
 			catch (SocketException) { } //ignore timeout
 
-			sender = null;
 			return null;
 		}
 	}

@@ -45,9 +45,9 @@ namespace СhatTree
 
 			_consoleCommands = new Dictionary<string, Display>()
 			{
-				["/nodeMap"] = () => Console.WriteLine("Showing node map:\n\tParent: {_parentIP}"
-														+ "\n\tChilds: { _childs}")
-			};
+				["/parent"] = () => Console.WriteLine("Parent: {0}", _parentIP),
+				["/childs"] = () => Console.WriteLine("Childs: {" + string.Join(", ", _childs) + "}")
+		};
 		}
 
 		private async Task<string> GetLineAsync()
@@ -161,6 +161,7 @@ namespace СhatTree
 
 			foreach (var item in itemsToRemove)
 			{
+				Console.WriteLine(">>> " + item.Key + " is unavailable");
 				manager.RemoveNode(item.Key);
 				if (item.Key == _parentIP)
 				{
