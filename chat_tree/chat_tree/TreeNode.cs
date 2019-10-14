@@ -106,16 +106,16 @@ namespace СhatTree
 							readLine = Task.Run(() => Console.ReadLine());
 						}
 
-						IPEndPoint sender;
-						Message message = manager.TryReceiveMessage(_lossRate, out sender);
+						Message message = manager.TryReceiveMessage(_lossRate, out IPEndPoint sender);
 						if (message == null)
 							continue;
 
 						AnswerMessage(manager, message, sender);
 					}
-
+					
 					RemoveAndReelectNodes(manager);
 					manager.Resend();
+					manager.SendToAll(new Message(_name, ContentType.HealthCheck));
 				}
 			}
 		}
@@ -140,9 +140,7 @@ namespace СhatTree
 							_childsReserve = _childs.First();
 						}
 					}
-
-					manager.ConfirmReception(message.GuidProperty, sender);
-					break;
+					goto default;
 
 				case ContentType.ReceptionConfirmation:
 					Guid confirmedID = ((ConfirmationMessage)message).ConfirmedGuid;
@@ -156,11 +154,13 @@ namespace СhatTree
 						Console.WriteLine("@{0}: {1}", message.Name, ((DataMessage)message).Data);
 						manager.SendToAllExclude(message, sender);
 					}
-					manager.ConfirmReception(message.GuidProperty, sender);
-					break;
+					goto default;
 
 				case ContentType.ReserveNode: //update reserve node
 					_reserveNode = ((ReserveNodeMessage)message).ReserveNode.GetIPEndPoint();
+					goto default;
+
+				default:
 					manager.ConfirmReception(message.GuidProperty, sender);
 					break;
 			}
