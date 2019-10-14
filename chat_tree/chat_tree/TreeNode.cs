@@ -50,7 +50,8 @@ namespace СhatTree
 			IEnumerable<IPAddress> addresses = Dns.GetHostAddresses(Dns.GetHostName())
 					.Where(addr => addr.AddressFamily == AddressFamily.InterNetwork);
 
-			string strAddressses = "Local addresses: " + string.Join(",\n\t ", addresses);
+			string strAddressses = "Local addresses: " + string.Join(",\n\t ", addresses)
+						+ "\nPort listening: " + _port;
 
 			_consoleCommands = new Dictionary<string, Display>()
 			{

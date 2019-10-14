@@ -38,6 +38,7 @@ namespace ChatTree
 
 		public void ConnectTo(IPEndPoint endPoint)
 		{
+			Console.WriteLine(">>> Connected to " + endPoint);
 			_endPointsQueues.Add(endPoint, new QueuedMessages(_resendTimeout));
 			SendToOne(new Message(_name, ContentType.ConnectionRequest), endPoint);
 		}
