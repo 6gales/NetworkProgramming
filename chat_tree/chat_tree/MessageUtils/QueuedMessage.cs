@@ -33,8 +33,6 @@ namespace ChatTree.MessageUtils
 
 		public void Remove(Guid guid) => _messageToDeliver.Remove(guid);
 
-		public int Count() => _messageToDeliver.Count;
-
 		public void ResendAll(IPEndPoint receiver, UdpClient udpClient)
 		{
 			long now = DateTimeOffset.Now.ToUnixTimeMilliseconds();

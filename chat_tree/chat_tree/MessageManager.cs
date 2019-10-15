@@ -83,8 +83,9 @@ namespace ChatTree
 		public IEnumerable<KeyValuePair<IPEndPoint, QueuedMessages>> GetUnavailableNodes(long maxUnavilableTimeout)
 		{
 			long now = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-			return _endPointsQueues.Where(pair => 
-				now - pair.Value.LastSeenMillis > maxUnavilableTimeout && pair.Value.Count() > 0);
+			return _endPointsQueues
+				.Where(pair => now - pair.Value.LastSeenMillis > maxUnavilableTimeout)
+				.ToList();
 		}
 
 		public void RemoveNode(IPEndPoint endPoint)

@@ -47,18 +47,11 @@ namespace СhatTree
 			_childs = new HashSet<IPEndPoint>();
 			_messageHistory = new HashSet<Guid>();
 
-			IEnumerable<IPAddress> addresses = Dns.GetHostAddresses(Dns.GetHostName())
-					.Where(addr => addr.AddressFamily == AddressFamily.InterNetwork);
-
-			string strAddressses = "Local addresses: " + string.Join(",\n\t ", addresses)
-						+ "\nPort listening: " + _port;
-
 			_consoleCommands = new Dictionary<string, Display>()
 			{
 				["/parent"] = () => Console.WriteLine("Parent: {0}", _parentIP),
 				["/childs"] = () => Console.WriteLine("Childs: {" + string.Join(", ", _childs) + "}"),
 				["/exit"] = () => _notExited = false,
-				["/localAddr"] = () => Console.WriteLine(strAddressses)
 			};
 		}
 
@@ -169,7 +162,7 @@ namespace СhatTree
 		
 		private void RemoveAndReelectNodes(MessageManager manager)
 		{
-			var itemsToRemove = manager.GetUnavailableNodes(_maxUnavilableTimeout).ToList();
+			var itemsToRemove = manager.GetUnavailableNodes(_maxUnavilableTimeout);
 
 			foreach (var item in itemsToRemove)
 			{
@@ -178,9 +171,10 @@ namespace СhatTree
 				if (item.Key.Equals(_parentIP))
 				{
 					_parentIP = _reserveNode;
-		
-					if (_reserveNode != null)
-						manager.ConnectTo(_reserveNode);
+					_reserveNode = null;
+
+					if (_parentIP != null)
+						manager.ConnectTo(_parentIP);
 				}
 				else
 				{
@@ -189,7 +183,6 @@ namespace СhatTree
 
 				if (item.Key.Equals(_childsReserve))
 				{
-					
 					_childsReserve = _parentIP ?? (_childs.Count > 0 ? _childs.First() : null);
 
 					if (_childsReserve == null)
