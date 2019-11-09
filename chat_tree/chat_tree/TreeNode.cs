@@ -26,8 +26,8 @@ namespace СhatTree
 
 		private HashSet<Guid> _messageHistory;
 
-		private delegate void Display();
-		private Dictionary<string, Display> _consoleCommands;
+		private delegate void Command();
+		private Dictionary<string, Command> _consoleCommands;
 
 		public TreeNode(string name, int loss, int port) : this(name, loss, port, null, 0) { }
 
@@ -47,7 +47,7 @@ namespace СhatTree
 			_childs = new HashSet<IPEndPoint>();
 			_messageHistory = new HashSet<Guid>();
 
-			_consoleCommands = new Dictionary<string, Display>()
+			_consoleCommands = new Dictionary<string, Command>()
 			{
 				["/parent"] = () => Console.WriteLine("Parent: {0}", _parentIP),
 				["/childs"] = () => Console.WriteLine("Childs: {" + string.Join(", ", _childs) + "}"),
