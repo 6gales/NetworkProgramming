@@ -1,25 +1,24 @@
-﻿using Newtonsoft.Json;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
-using System.Text;
-using System.Threading.Tasks;
-using RestChat.ModelDefinition;
 using System.Net.Http.Headers;
-using System.Threading;
 using System.Net.WebSockets;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using Newtonsoft.Json;
 using WebSocketsChat.ModelDefinition;
 
-namespace RestChat.Client
+namespace WebSocketsChat.Client
 {
 	class Client
 	{
 		private bool _notExited = true;
-		private string _server;
+		private readonly string _server;
 
 		private delegate void Command(string parameters);
-		private Dictionary<string, Command> _consoleCommands;
+		private readonly Dictionary<string, Command> _consoleCommands;
 
 		private List<Message> _messages;
 		private IEnumerable<User> _users;
@@ -31,18 +30,16 @@ namespace RestChat.Client
 			_server = server;
 			_consoleCommands = new Dictionary<string, Command>()
 			{
-				["/help"] = (s)
-					=> Console.WriteLine("Commands: " + string.Join("\n\t", _consoleCommands.Keys)),
-				["/list"] = (s)
-					=> Console.WriteLine("User list:\n\t" + string.Join(",\n\t", _users)),
+				["/help"] = _ => Console.WriteLine("Commands: " + string.Join("\n\t", _consoleCommands.Keys)),
+				["/list"] = _ => ListUsers(),
 				["/user"] = GetUser,
 				["/delete"] = DeleteMessage,
-				["/logout"] = (s) => _notExited = false,
-				["/messages"] = (s) => ShowMessages()
+				["/logout"] = _ => _notExited = false,
+				["/messages"] = _ => ShowMessages(true)
 			};
 		}
 
-		private T GetFromResponse<T>(HttpResponseMessage response) 
+		private static T GetFromResponse<T>(HttpResponseMessage response) 
 			=> JsonConvert.DeserializeObject<T>(response.Content.ReadAsStringAsync().Result);
 
 		private void GetUser(string param)
@@ -68,11 +65,23 @@ namespace RestChat.Client
 			}
 		}
 
-		private void ShowMessages()
+		private void ShowMessages(bool clearConsole)
 		{
+			if (clearConsole)
+				Console.Clear();
+
 			foreach (var message in _messages)
 			{
 				Console.WriteLine(message);
+			}
+		}
+
+		private void ListUsers()
+		{
+			Console.WriteLine("Users:");
+			foreach (var user in _users)
+			{
+				Console.WriteLine("\t" + user);
 			}
 		}
 
@@ -95,15 +104,75 @@ namespace RestChat.Client
 			else Console.WriteLine(">>> Message deleted");
 		}
 
-		private async Task<string> GetLineAsync()
-		{
-			return await Task.Run(() => Console.ReadLine());
-		}
+		private static async Task<string> GetLineAsync() => await Task.Run(() => Console.ReadLine());
 
 		private Task<HttpResponseMessage> PostTo<T>(string url, T content)
 		{
 			HttpContent httpContent = new StringContent(JsonConvert.SerializeObject(content), Encoding.UTF8, "application/json");
 			return _httpClient.PostAsync(_server + url, httpContent);
+		}
+
+		private void HandleMessage(byte[] bytes, int receiveLen)
+		{
+			var data = Encoding.UTF8.GetString(bytes, 1, receiveLen - 1);
+
+			switch (bytes[0])
+			{
+				case (byte)WebSocketJsonType.Message:
+					var message = JsonConvert.DeserializeObject<Message>(data);
+					_messages.Add(message);
+					Console.WriteLine(message);
+					break;
+
+				case (byte)WebSocketJsonType.Messages:
+					_messages = JsonConvert.DeserializeObject<List<Message>>(data);
+					ShowMessages(true);
+					break;
+
+				case (byte)WebSocketJsonType.User:
+					_users = JsonConvert.DeserializeObject<IEnumerable<User>>(data);
+					
+					break;
+				default:
+					var deleted = JsonConvert.DeserializeObject<DeletedItem>(data);
+					switch (deleted.Item)
+					{
+						case Message m:
+							_messages.Remove(m);
+							ShowMessages(true);
+							break;
+						case User u:
+							_users.First(user => user.Equals(u)).Online = false;
+							ListUsers();
+							break;
+					}
+					break;
+			}
+		}
+
+		private LoginResponse LogIn()
+		{
+			HttpResponseMessage resp = null;
+			Console.Write("Enter your nickname: ");
+			do
+			{
+				if (resp != null)
+					Console.Write("Sorry, user with this nickname is already exists. \nPlease, choose another one: ");
+				LoginRequest loginRequest = new LoginRequest { Username = Console.ReadLine() };
+				resp = PostTo("/login", loginRequest).Result;
+
+			} while (resp.StatusCode != System.Net.HttpStatusCode.OK);
+
+			var login = JsonConvert.DeserializeObject<LoginResponse>(resp.Content.ReadAsStringAsync().Result);
+			_users = new[] { login };
+
+			_httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
+
+			resp = _httpClient.GetAsync(_server + "/messages?count=30&end=true").Result;
+			_messages = JsonConvert.DeserializeObject<List<Message>>(resp.Content.ReadAsStringAsync().Result);
+			ShowMessages(false);
+
+			return login;
 		}
 
 		void Run()
@@ -113,29 +182,11 @@ namespace RestChat.Client
 			{
 				httpClient.Timeout = Timeout.InfiniteTimeSpan;
 				_httpClient = httpClient;
-				HttpResponseMessage resp = null;
-				Console.Write("Enter your nickname: ");
-				do
-				{
-					if (resp != null)
-						Console.Write("Sorry, user with this nickname is already exists. \nPlease, choose another one: ");
-					LoginRequest loginRequest = new LoginRequest { Username = Console.ReadLine() };
-					resp = PostTo("/login", loginRequest).Result;
 
-				} while (resp.StatusCode != System.Net.HttpStatusCode.OK);
-
-				LoginResponse login = JsonConvert.DeserializeObject<LoginResponse>(resp.Content.ReadAsStringAsync().Result);
-				_users = new User[] { login };
-
-				httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
-
-				resp = httpClient.GetAsync(_server + "/messages?count=30&end=true").Result;
-				_messages = JsonConvert.DeserializeObject<List<Message>>(resp.Content.ReadAsStringAsync().Result);
-				ShowMessages();
+				var login = LogIn();
 
 				webSocket.ConnectAsync(new Uri($"ws://localhost:8888/subscribe?token={login.Token}"), CancellationToken.None).Wait();
-
-				byte[] bytes = new byte[2048];
+				var bytes = new byte[2048];
 
 				Task<WebSocketReceiveResult> webSocketResult = webSocket.ReceiveAsync(new ArraySegment<byte>(bytes), CancellationToken.None);
 
@@ -148,8 +199,8 @@ namespace RestChat.Client
 						var line = getLine.Result;
 						if (!string.IsNullOrEmpty(line))
 						{
-							int pos = line.IndexOf(" ");
-							string command = (pos > 0 ? line.Substring(0, pos) : line);
+							var pos = line.IndexOf(" ", StringComparison.Ordinal);
+							var command = (pos > 0 ? line.Substring(0, pos) : line);
 
 							if (_consoleCommands.TryGetValue(command, out Command cmd))
 							{
@@ -166,40 +217,14 @@ namespace RestChat.Client
 
 					if (webSocketResult.IsCompleted)
 					{
-						
-						string data = Encoding.UTF8.GetString(bytes, 1, webSocketResult.Result.Count - 1);
-
-						switch(bytes[0])
-						{
-							case (byte)WebSocketJsonType.Message:
-								var message = JsonConvert.DeserializeObject<Message>(data);
-								_messages.Add(message);
-								Console.WriteLine(message);
-								break;
-
-							case (byte)WebSocketJsonType.Messages:
-								_messages = JsonConvert.DeserializeObject<List<Message>>(data);
-								Console.Clear();
-								ShowMessages();
-								break;
-
-							default:
-								_users = JsonConvert.DeserializeObject<IEnumerable<User>>(data);
-								Console.WriteLine("Users:");
-								foreach (var user in _users)
-								{
-									Console.WriteLine("\t" + user);
-								}
-								break;
-						}
-						
+						HandleMessage(bytes, webSocketResult.Result.Count);
 						webSocketResult = webSocket.ReceiveAsync(new ArraySegment<byte>(bytes), CancellationToken.None);
 					}
 
 					Thread.Sleep(500);
 				}
 
-				var answer = httpClient.PostAsync(_server + "/logout", new StringContent("")).Result;
+				httpClient.PostAsync(_server + "/logout", new StringContent("")).Wait();
 				webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "logout", CancellationToken.None);
 			}
 		}
@@ -211,7 +236,7 @@ namespace RestChat.Client
 				Console.WriteLine("Usage: <server address>");
 				return;
 			}
-			Client client = new Client(args[0]);
+			var client = new Client(args[0]);
 			client.Run();
 		}
 	}

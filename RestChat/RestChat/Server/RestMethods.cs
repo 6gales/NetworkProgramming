@@ -3,21 +3,17 @@ using RestChat.ModelDefinition;
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Net;
-using System.Net.Http.Headers;
 using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace RestChat.Server
 {
 	class RestMethods
 	{
-		public delegate void PostResourse<T>(T resourse);
-		public delegate bool GetResourseById<T>(int id, out T value);
-		public delegate bool GetResourseByQuery<T>(Dictionary<string, string> query, out IEnumerable<T> resourse);
-		public delegate bool DeleteResourse(int id);
+		public delegate void PostResource<T>(T resource);
+		public delegate bool GetResourceById<T>(int id, out T value);
+		public delegate bool GetResourceByQuery<T>(Dictionary<string, string> query, out IEnumerable<T> resource);
+		public delegate bool DeleteResource(int id);
 
 		public delegate bool VerifyUser(HttpListenerRequest request);
 
@@ -26,9 +22,9 @@ namespace RestChat.Server
 			_verify = verify;
 		}
 
-		private VerifyUser _verify;
+		private readonly VerifyUser _verify;
 
-		public void PerformDelete(HttpListenerContext context, DeleteResourse deleteResourse, string parameter)
+		public void PerformDelete(HttpListenerContext context, DeleteResource deleteResource, string parameter)
 		{
 			if (_verify != null && !_verify(context.Request))
 			{
@@ -38,18 +34,18 @@ namespace RestChat.Server
 
 			if (int.TryParse(parameter, out int id))
 			{
-				if (deleteResourse.Invoke(id))
+				if (deleteResource.Invoke(id))
 				{
 					context.Response.StatusCode = (int)HttpStatusCode.NoContent;
 					context.Response.OutputStream.Close();
 				}
 				else WriteError(context.Response, HttpStatusCode.NotFound,
-								"resourse with provided id not found");
+								"resource with provided id not found");
 			}
 			else WriteError(context.Response, HttpStatusCode.BadRequest, parameter + " unexpected");
 		}
 
-		public void PerformGet<T>(HttpListenerContext context, GetResourseByQuery<T> getResourse)
+		public void PerformGet<T>(HttpListenerContext context, GetResourceByQuery<T> getResource)
 		{
 			if (_verify != null && !_verify(context.Request))
 			{
@@ -77,16 +73,16 @@ namespace RestChat.Server
 				}
 			}
 
-			if (getResourse.Invoke(queryDictionary, out IEnumerable<T> resourses))
+			if (getResource.Invoke(queryDictionary, out IEnumerable<T> resources))
 			{
-				WriteToResponse(context.Response, resourses);
+				WriteToResponse(context.Response, resources);
 				return;
 			}
 
 			WriteError(context.Response, HttpStatusCode.BadRequest, "bad query parameters");
 		}
 
-		public void PerformGetById<T>(HttpListenerContext context, GetResourseById<T> getResourse, string parameter)
+		public void PerformGetById<T>(HttpListenerContext context, GetResourceById<T> getResource, string parameter)
 		{
 			if (_verify != null && !_verify(context.Request))
 			{
@@ -96,17 +92,17 @@ namespace RestChat.Server
 
 			if (int.TryParse(parameter, out int id))
 			{
-				if (getResourse.Invoke(id, out T value))
+				if (getResource.Invoke(id, out T value))
 				{
 					WriteToResponse(context.Response, value);
 				}
 				else WriteError(context.Response, HttpStatusCode.NotFound,
-								"resourse with provided id not found");
+								"resource with provided id not found");
 			}
 			else WriteError(context.Response, HttpStatusCode.BadRequest, parameter + " unexpected");
 		}
 
-		public void PerformPost<T>(HttpListenerContext context, PostResourse<T> postResourse)
+		public void PerformPost<T>(HttpListenerContext context, PostResource<T> postResource)
 		{
 			if (_verify != null && !_verify(context.Request))
 			{
@@ -125,7 +121,7 @@ namespace RestChat.Server
 				return;
 			}
 
-			postResourse(message);
+			postResource(message);
 
 			context.Response.StatusCode = (int)HttpStatusCode.NoContent;
 			context.Response.OutputStream.Close();
@@ -150,15 +146,15 @@ namespace RestChat.Server
 
 		public static void WriteToResponse<T>(HttpListenerResponse response, T message)
 		{
-			string responseStr = JsonConvert.SerializeObject(message);
-			byte[] buffer = Encoding.UTF8.GetBytes(responseStr);
+			var responseStr = JsonConvert.SerializeObject(message);
+			var buffer = Encoding.UTF8.GetBytes(responseStr);
 			
 			try
 			{
 				response.ContentLength64 = buffer.Length;
 				response.ContentType = "application/json";
 
-				using (Stream output = response.OutputStream)
+				using (var output = response.OutputStream)
 				{
 					output.Write(buffer, 0, buffer.Length);
 				}

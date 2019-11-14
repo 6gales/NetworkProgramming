@@ -1,37 +1,31 @@
 ﻿using System;
-using System.Net.Http;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Net;
-using RestChat.ModelDefinition;
-using System.IO;
-using System.Threading;
-using System.Collections.Concurrent;
+using System.Net.Http;
 using System.Net.WebSockets;
-using WebSocketsChat.ModelDefinition;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Newtonsoft.Json;
+using WebSocketsChat.ModelDefinition;
 
-namespace RestChat.Server
+namespace WebSocketsChat.Server
 {
-	class Pair<T1, T2>
+	class Server
 	{
-		public T1 First { get; set; }
-	
-		public T2 Second { get; set; }
-	}
-		class Server
-	{
-		private int _userId = 0;
-		private int _messageId = 0;
-		private int _port;
-		private ConcurrentDictionary<int, User> _users;
-		private ConcurrentDictionary<string, int> _tokens;
-		private ConcurrentDictionary<string, int> _usernames;
-		private ConcurrentDictionary<int, Message> _messages;
+		private static readonly char[] Padding = { '=' };
+
+		private int _userId;
+		private int _messageId;
+		private readonly int _port;
+		private readonly ConcurrentDictionary<int, User> _users;
+		private readonly ConcurrentDictionary<string, int> _tokens;
+		private readonly ConcurrentDictionary<string, int> _usernames;
+		private readonly ConcurrentDictionary<int, Message> _messages;
 		
-		private Dictionary<WebSocket, Pair<int, Task>> _webSockets;
+		private readonly Dictionary<WebSocket, Pair<int, Task>> _webSockets;
 
 		private Server(int port)
 		{
@@ -65,21 +59,23 @@ namespace RestChat.Server
 					RestMethods.WriteError(context.Response, HttpStatusCode.Unauthorized, "username is already in use");
 					return;
 				}
-				else
-				{
-					_users.TryRemove(id, out User val);
-					_usernames.TryRemove(request.Username, out id);
-					_tokens.TryRemove(_tokens.Where(tokenid => tokenid.Value == id).First().Key, out id);
-				}
+
+				_users.TryRemove(id, out _);
+				_usernames.TryRemove(request.Username, out id);
+				_tokens.TryRemove(_tokens.First(tokenId => tokenId.Value == id).Key, out id);
 			}
 
 			lock (this)
 			{
 				id = ++_userId;
 			}
-			string token = Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Replace('=', '-');
+			
+			var token = Convert.ToBase64String(Guid.NewGuid().ToByteArray())
+				.TrimEnd(Padding)
+				.Replace('+', '-')
+				.Replace('/', '_');
 
-			LoginResponse loginResponse = new LoginResponse
+			var loginResponse = new LoginResponse
 			{
 				Username = request.Username,
 				Id = id,
@@ -112,15 +108,18 @@ namespace RestChat.Server
 		{
 			var token = RestMethods.GetToken(context.Request);
 
-			if (!_tokens.TryRemove(token, out int id))
+			if (!_tokens.TryRemove(token, out var id))
 			{
 				RestMethods.WriteError(context.Response, HttpStatusCode.Unauthorized, "Authorization failed");
 				return;
 			}
-			_users.TryRemove(id, out User user);
+			_users.TryRemove(id, out var user);
 			_usernames.TryRemove(user.Username, out id);
 
-			SendToAllSubscribers(WebSocketJsonType.User, _users.Values);
+			SendToAllSubscribers(WebSocketJsonType.DeletedResource, new DeletedItem
+			{
+				Item = user
+			});
 
 			context.Response.StatusCode = (int)HttpStatusCode.NoContent;
 			context.Response.OutputStream.Close();
@@ -128,20 +127,15 @@ namespace RestChat.Server
 
 		private void SendToAllSubscribers<T>(WebSocketJsonType type, T data)
 		{
-			List<WebSocket> toRemove = new List<WebSocket>();
+			var wsToRemove = new List<WebSocket>();
 
-			string responseStr = JsonConvert.SerializeObject(data);
-			byte[] buffer = Encoding.UTF8.GetBytes(responseStr);
-			byte[] buffWithType = new byte[buffer.Length + 1];
+			var responseStr = JsonConvert.SerializeObject(data);
+			var buffer = Encoding.UTF8.GetBytes(responseStr);
+			var buffWithType = new byte[buffer.Length + 1];
 			buffWithType[0] = (byte)type;
-			//			Buffer.BlockCopy(buffer, 0, buffWithType, 1, buffer.Length);
+			Buffer.BlockCopy(buffer, 0, buffWithType, 1, buffer.Length);
 
-			for (int i = 0; i < buffer.Length; i++)
-			{
-				buffWithType[i + 1] = buffer[i];
-			}
-
-			ArraySegment<byte> segment = new ArraySegment<byte>(buffWithType);
+			var segment = new ArraySegment<byte>(buffWithType);
 
 			lock (_webSockets)
 			{
@@ -149,9 +143,9 @@ namespace RestChat.Server
 				{
 					if (ws.Value.Second.IsCompleted)
 					{
-						if (_users.TryGetValue(ws.Value.First, out User user))
+						if (_users.TryGetValue(ws.Value.First, out var user))
 							user.Online = false;
-						toRemove.Add(ws.Key);
+						wsToRemove.Add(ws.Key);
 					}
 					else
 					{
@@ -159,7 +153,7 @@ namespace RestChat.Server
 					}
 				}
 
-				foreach (var ws in toRemove)
+				foreach (var ws in wsToRemove)
 				{
 					_webSockets.Remove(ws);
 				}
@@ -179,12 +173,15 @@ namespace RestChat.Server
 
 		private bool DeleteMessage(int id)
 		{
-			if (_messages.TryRemove(id, out Message val))
+			if (!_messages.TryRemove(id, out var message))
 			{
-				SendToAllSubscribers(WebSocketJsonType.Messages, _messages.Values);
-				return true;
+				return false;
 			}
-			return false;
+			SendToAllSubscribers(WebSocketJsonType.DeletedResource, new DeletedItem
+			{
+				Item = message
+			});
+			return true;
 		}
 
 		private bool GetMessagesByQuery(Dictionary<string, string> query, out IEnumerable<Message> messages)
@@ -196,45 +193,37 @@ namespace RestChat.Server
 				return true;
 			}
 
-			int offset = 0;
-			if (query.TryGetValue("offset", out string strOffset)
+			var offset = 0;
+			if (query.TryGetValue("offset", out var strOffset)
 				&& !int.TryParse(strOffset, out offset))
 			{
 				return false;
 			}
 
-			bool fromEnd = false;
-			if (query.TryGetValue("end", out string strEnd)
+			var fromEnd = false;
+			if (query.TryGetValue("end", out var strEnd)
 				&& !bool.TryParse(strEnd, out fromEnd))
 			{
 				return false;
 			}
 
-			if (query.TryGetValue("count", out string strCount)
-				&& int.TryParse(strCount, out int count))
+			if (!query.TryGetValue("count", out var strCount)
+			    || !int.TryParse(strCount, out var count))
 			{
-				int num = 0, storedCount = 0;
-
-				if (fromEnd)
-				{
-					offset = _messages.Count - count;
-					if (offset < 0) offset = 0;
-				}
-
-				var listMessages = new List<Message>();
-				foreach (var pair in _messages)
-				{
-					if (num++ >= offset && storedCount++ < count)
-					{
-						listMessages.Add(pair.Value);
-					}
-				}
-
-				messages = listMessages;
-				return true;
+				return false;
 			}
 
-			return false;
+			int num = 0, storedCount = 0;
+
+			if (fromEnd)
+			{
+				offset = _messages.Count - count;
+				if (offset < 0) offset = 0;
+			}
+
+			messages = (from pair in _messages
+				where num++ >= offset && storedCount++ < count select pair.Value).ToList();
+			return true;
 		}
 
 		private bool GetUsersByQuery(Dictionary<string, string> query, out IEnumerable<User> users)
@@ -257,13 +246,13 @@ namespace RestChat.Server
 
 			users = _users.Values.Where(user =>
 				(string.IsNullOrEmpty(name) || user.Username == name)
-				&& (online != null ? online == user.Online : true));
+				&& (online == null || online == user.Online));
 			return true;
 		}
 
 		private bool VerifyToken(HttpListenerRequest request)
 		{
-			string token = RestMethods.GetToken(request);
+			var token = RestMethods.GetToken(request);
 			return _tokens.ContainsKey(token);
 		}
 
@@ -291,11 +280,11 @@ namespace RestChat.Server
 
 			lock (_webSockets)
 			{
-				var cancelletionTask = wsContext.WebSocket.ReceiveAsync(new ArraySegment<byte>(new byte[1024]), CancellationToken.None);
+				var cancellationTask = wsContext.WebSocket.ReceiveAsync(new ArraySegment<byte>(new byte[1024]), CancellationToken.None);
 				_webSockets.Add(wsContext.WebSocket, new Pair<int, Task>
 				{
 					First = userId,
-					Second = cancelletionTask
+					Second = cancellationTask
 				});
 			}
 		}
@@ -348,8 +337,8 @@ namespace RestChat.Server
 				while (true)
 				{
 					var context = httpListener.GetContext();
-					HttpListenerRequest request = context.Request;
-					Thread t = new Thread(() =>
+					var request = context.Request;
+					var t = new Thread(() =>
 					{
 						if (router.TryGetHandler(request, out HandlerFunc handler))
 						{
@@ -364,8 +353,19 @@ namespace RestChat.Server
 
 		static void Main(string[] args)
 		{
-			Server server = new Server(8888);
+			if (args == null || args.Length < 1 || !int.TryParse(args[0], out var port))
+			{
+				port = 8888;
+			}
+			Server server = new Server(port);
 			server.Run();
+		}
+
+		class Pair<T1, T2>
+		{
+			public T1 First { get; set; }
+
+			public T2 Second { get; set; }
 		}
 	}
 }

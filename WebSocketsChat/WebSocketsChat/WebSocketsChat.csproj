@@ -32,7 +32,7 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <PropertyGroup>
-    <StartupObject>RestChat.Server.Server</StartupObject>
+    <StartupObject>WebSocketsChat.Server.Server</StartupObject>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="Newtonsoft.Json, Version=12.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
@@ -49,7 +49,9 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Client\Client.cs" />
+    <Compile Include="ModelDefinition\DeletedItem.cs" />
     <Compile Include="ModelDefinition\Error.cs" />
+    <Compile Include="ModelDefinition\IIdentifiedResource.cs" />
     <Compile Include="ModelDefinition\LoginModels.cs" />
     <Compile Include="ModelDefinition\Message.cs" />
     <Compile Include="ModelDefinition\User.cs" />
