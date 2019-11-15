@@ -1,7 +1,6 @@
 ﻿using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
@@ -14,19 +13,20 @@ namespace RestChat.Client
 	class Client
 	{
 		private bool _notExited = true;
-		private string _server;
+		private readonly string _httpAddress;
 
 		private delegate void Command(string parameters);
-		private Dictionary<string, Command> _consoleCommands;
+		private readonly Dictionary<string, Command> _consoleCommands;
 
 		private List<Message> _messages;
 		private IEnumerable<User> _users;
 
-		HttpClient _httpClient;
+		private HttpClient _httpClient;
 
-		Client(string server)
+		Client(string server, int port)
 		{
-			_server = server;
+			_httpAddress = "http://" + server + ":" + port + "/";
+
 			_consoleCommands = new Dictionary<string, Command>()
 			{
 				["/help"] = (s)
@@ -40,19 +40,19 @@ namespace RestChat.Client
 			};
 		}
 
-		private T GetFromResponse<T>(HttpResponseMessage response) 
+		private static T GetFromResponse<T>(HttpResponseMessage response) 
 			=> JsonConvert.DeserializeObject<T>(response.Content.ReadAsStringAsync().Result);
 
 		private void GetUser(string param)
 		{
-			string[] parsed = param.Split(' ');
+			var parsed = param.Split(' ');
 			if (_httpClient == null || parsed.Length < 2)
 			{
 				Console.WriteLine(">>> Invalid command arguments");
 				return;
 			}
 
-			var response = _httpClient.GetAsync(_server + "/users/" + parsed[1]).Result;
+			var response = _httpClient.GetAsync(_httpAddress + "/users/" + parsed[1]).Result;
 
 			if (response.StatusCode == System.Net.HttpStatusCode.OK)
 			{
@@ -83,7 +83,7 @@ namespace RestChat.Client
 				return;
 			}
 
-			var response = _httpClient.DeleteAsync(_server + "/messages/" + parsed[1]).Result;
+			var response = _httpClient.DeleteAsync(_httpAddress + "/messages/" + parsed[1]).Result;
 
 			if (response.StatusCode != System.Net.HttpStatusCode.NoContent)
 			{
@@ -93,15 +93,12 @@ namespace RestChat.Client
 			else Console.WriteLine(">>> Message deleted");
 		}
 
-		private async Task<string> GetLineAsync()
-		{
-			return await Task.Run(() => Console.ReadLine());
-		}
+		protected async Task<string> GetLineAsync() => await Task.Run(() => Console.ReadLine());
 
 		private Task<HttpResponseMessage> PostTo<T>(string url, T content)
 		{
 			HttpContent httpContent = new StringContent(JsonConvert.SerializeObject(content), Encoding.UTF8, "application/json");
-			return _httpClient.PostAsync(_server + url, httpContent);
+			return _httpClient.PostAsync(_httpAddress + url, httpContent);
 		}
 
 		void Run()
@@ -126,13 +123,13 @@ namespace RestChat.Client
 
 				httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
 
-				resp = httpClient.GetAsync(_server + "/messages?count=30&end=true").Result;
+				resp = httpClient.GetAsync(_httpAddress + "/messages?count=30&end=true").Result;
 				_messages = JsonConvert.DeserializeObject<List<Message>>(resp.Content.ReadAsStringAsync().Result);
 				ShowMessages();
 
 				Task<string> getLine = GetLineAsync();
-				Task<HttpResponseMessage> messageRequest = httpClient.GetAsync(_server + "/messages");
-				Task<HttpResponseMessage> userRequest = httpClient.GetAsync(_server + "/users");
+				Task<HttpResponseMessage> messageRequest = httpClient.GetAsync(_httpAddress + "/messages");
+				Task<HttpResponseMessage> userRequest = httpClient.GetAsync(_httpAddress + "/users");
 
 				while (_notExited)
 				{
@@ -141,10 +138,10 @@ namespace RestChat.Client
 						var line = getLine.Result;
 						if (!string.IsNullOrEmpty(line))
 						{
-							int pos = line.IndexOf(" ");
-							string command = (pos > 0 ? line.Substring(0, pos) : line);
+							var pos = line.IndexOf(" ", StringComparison.Ordinal);
+							var command = (pos > 0 ? line.Substring(0, pos) : line);
 
-							if (_consoleCommands.TryGetValue(command, out Command cmd))
+							if (_consoleCommands.TryGetValue(command, out var cmd))
 							{
 								cmd.Invoke(line);
 							}
@@ -166,7 +163,7 @@ namespace RestChat.Client
 							_messages.Add(message);
 						}
 
-						messageRequest = httpClient.GetAsync(_server + "/messages");
+						messageRequest = httpClient.GetAsync(_httpAddress + "/messages");
 					}
 
 					if (userRequest.IsCompleted)
@@ -178,13 +175,13 @@ namespace RestChat.Client
 							Console.WriteLine("\t" + user);
 						}
 
-						userRequest = httpClient.GetAsync(_server + "/users");
+						userRequest = httpClient.GetAsync(_httpAddress + "/users");
 					}
 
 					Thread.Sleep(500);
 				}
 
-				httpClient.PostAsync(_server + "/logout", null).Wait();
+				httpClient.PostAsync(_httpAddress + "/logout", null).Wait();
 			}
 		}
 
@@ -192,11 +189,29 @@ namespace RestChat.Client
 		{
 			if (args.Length < 1)
 			{
-				Console.WriteLine("Usage: <server address>");
+				Console.WriteLine("Usage: <server address> <port>");
 				return;
 			}
-			Client client = new Client(args[0]);
-			client.Run();
+			if (args.Length != 2 || !int.TryParse(args[1], out int port))
+			{
+				port = 8888;
+			}
+			var client = new Client(args[0], port);
+
+			try
+			{
+				client.Run();
+			}
+			catch (AggregateException e)
+			{
+				Console.WriteLine("Network error occured: " + e.Message);
+			}
+			catch (Exception e)
+			{
+				Console.WriteLine("Error occured: " + e.Message);
+			}
+
+			Console.WriteLine("Finishing program");
 		}
 	}
 }

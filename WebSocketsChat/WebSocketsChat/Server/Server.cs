@@ -83,6 +83,13 @@ namespace WebSocketsChat.Server
 				Token = token
 			};
 
+			var user = new User
+			{
+				Username = loginResponse.Username,
+				Id = id,
+				Online = true
+			};
+
 			lock (_usernames)
 			{
 				if (!_usernames.TryAdd(loginResponse.Username, id))
@@ -90,16 +97,11 @@ namespace WebSocketsChat.Server
 					context.Response.AppendHeader(HttpResponseHeader.WwwAuthenticate.ToString(), "Token realm = 'Username is already in use'");
 					RestMethods.WriteError(context.Response, HttpStatusCode.Unauthorized, "username is already in use");
 				}
-				_users.TryAdd(id, new User
-				{
-					Username = loginResponse.Username,
-					Id = id,
-					Online = true
-				});
+				_users.TryAdd(id, user);
 				_tokens.TryAdd(token, id);
 			}
 
-			SendToAllSubscribers(WebSocketJsonType.User, _users.Values);
+			SendToAllSubscribers(WebSocketJsonType.User, user);
 
 			RestMethods.WriteToResponse(context.Response, loginResponse);
 		}
@@ -118,24 +120,30 @@ namespace WebSocketsChat.Server
 
 			SendToAllSubscribers(WebSocketJsonType.DeletedResource, new DeletedItem
 			{
-				Item = user
+				Item = user,
+				Type = WebSocketJsonType.User
 			});
 
 			context.Response.StatusCode = (int)HttpStatusCode.NoContent;
 			context.Response.OutputStream.Close();
 		}
 
-		private void SendToAllSubscribers<T>(WebSocketJsonType type, T data)
+		private static ArraySegment<byte> ConvertToBytesWithType<T>(WebSocketJsonType type, T data)
 		{
-			var wsToRemove = new List<WebSocket>();
-
 			var responseStr = JsonConvert.SerializeObject(data);
 			var buffer = Encoding.UTF8.GetBytes(responseStr);
 			var buffWithType = new byte[buffer.Length + 1];
 			buffWithType[0] = (byte)type;
+			
 			Buffer.BlockCopy(buffer, 0, buffWithType, 1, buffer.Length);
+			
+			return new ArraySegment<byte>(buffWithType);
+		}
 
-			var segment = new ArraySegment<byte>(buffWithType);
+		private void SendToAllSubscribers<T>(WebSocketJsonType type, T data)
+		{
+			var wsToRemove = new List<WebSocket>();
+			var segment = ConvertToBytesWithType(type, data);
 
 			lock (_webSockets)
 			{
@@ -179,7 +187,8 @@ namespace WebSocketsChat.Server
 			}
 			SendToAllSubscribers(WebSocketJsonType.DeletedResource, new DeletedItem
 			{
-				Item = message
+				Item = message,
+				Type = WebSocketJsonType.Message
 			});
 			return true;
 		}
@@ -277,6 +286,9 @@ namespace WebSocketsChat.Server
 				RestMethods.WriteError(context.Response, HttpStatusCode.Unauthorized, "no match for token value");
 				return;
 			}
+
+			var segment = ConvertToBytesWithType(WebSocketJsonType.Users, _users.Values);
+			wsContext.WebSocket.SendAsync(segment, WebSocketMessageType.Binary, false, CancellationToken.None).Wait();
 
 			lock (_webSockets)
 			{

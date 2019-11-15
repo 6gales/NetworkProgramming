@@ -2,11 +2,8 @@
 
 namespace WebSocketsChat.ModelDefinition
 {
-	class User : IIdentifiedResource
+	class User : IdentifiedResource
 	{
-		[JsonProperty("id")]
-		public int Id { get; set; }
-
 		[JsonProperty("username")]
 		public string Username { get; set; }
 

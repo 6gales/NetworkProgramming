@@ -2,24 +2,19 @@
 using System.Net.Http;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Net;
 using RestChat.ModelDefinition;
-using System.IO;
-using Newtonsoft.Json;
 using System.Threading;
 using System.Collections.Concurrent;
-using System.Text.RegularExpressions;
 
 namespace RestChat.Server
 {
 	class Server
 	{
-		private readonly int _eventsToSkip = 3;
-		private int _userId = 0;
-		private int _messageId = 0;
-		private int _port;
+		private const int EventsToSkip = 3;
+		private int _userId;
+		private int _messageId;
+		private readonly int _port;
 		private ConcurrentDictionary<int, User> _users;
 		private ConcurrentDictionary<string, int> _tokens;
 		private ConcurrentDictionary<string, int> _usernames;
@@ -64,9 +59,9 @@ namespace RestChat.Server
 				}
 				else
 				{
-					_users.TryRemove(id, out User val);
+					_users.TryRemove(id, out _);
 					_usernames.TryRemove(request.Username, out id);
-					_tokens.TryRemove(_tokens.Where(tokenid => tokenid.Value == id).First().Key, out id);
+					_tokens.TryRemove(_tokens.First(tokenId => tokenId.Value == id).Key, out id);
 				}
 			}
 
@@ -74,9 +69,9 @@ namespace RestChat.Server
 			{
 				id = ++_userId;
 			}
-			string token = Convert.ToBase64String(Guid.NewGuid().ToByteArray());
+			var token = Convert.ToBase64String(Guid.NewGuid().ToByteArray());
 
-			LoginResponse loginResponse = new LoginResponse
+			var loginResponse = new LoginResponse
 			{
 				Username = request.Username,
 				Id = id,
@@ -129,7 +124,7 @@ namespace RestChat.Server
 
 			if (_tokens.TryGetValue(token, out int id))
 			{
-				_eventsHandled.AddOrUpdate(id, _eventsToSkip, (key, val) => _eventsToSkip);
+				_eventsHandled.AddOrUpdate(id, EventsToSkip, (key, val) => EventsToSkip);
 			}
 		}
 
@@ -164,7 +159,7 @@ namespace RestChat.Server
 
 		private bool DeleteMessage(int id)
 		{
-			return _messages.TryRemove(id, out Message val);
+			return _messages.TryRemove(id, out _);
 		}
 
 		private bool GetMessagesByQuery(Dictionary<string, string> query, out IEnumerable<Message> messages)
@@ -173,7 +168,7 @@ namespace RestChat.Server
 			if (query == null || query.Count == 0)
 			{
 				_messageEvent.WaitOne();
-				messages = new Message[] { _messages.Values.Last() };
+				messages = new[] { _messages.Values.Last() };
 				return true;
 			}
 
@@ -311,7 +306,11 @@ namespace RestChat.Server
 
 		static void Main(string[] args)
 		{
-			Server server = new Server(8888);
+			if (args == null || args.Length < 1 || !int.TryParse(args[0], out var port))
+			{
+				port = 8888;
+			}
+			Server server = new Server(port);
 			server.Run();
 		}
 	}

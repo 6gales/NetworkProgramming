@@ -5,6 +5,7 @@
 		Message,
 		Messages,
 		DeletedResource,
-		User
+		User,
+		Users
 	}
 }

@@ -16,18 +16,21 @@ namespace WebSocketsChat.Client
 	{
 		private bool _notExited = true;
 		private readonly string _server;
+		private readonly string _httpAddress;
 
 		private delegate void Command(string parameters);
 		private readonly Dictionary<string, Command> _consoleCommands;
 
 		private List<Message> _messages;
-		private IEnumerable<User> _users;
+		private List<User> _users;
 
 		HttpClient _httpClient;
 
-		Client(string server)
+		Client(string server, int port)
 		{
-			_server = server;
+			_server = server + ":" + port + "/";
+			_httpAddress = "http://" + _server;
+
 			_consoleCommands = new Dictionary<string, Command>()
 			{
 				["/help"] = _ => Console.WriteLine("Commands: " + string.Join("\n\t", _consoleCommands.Keys)),
@@ -51,7 +54,7 @@ namespace WebSocketsChat.Client
 				return;
 			}
 
-			var response = _httpClient.GetAsync(_server + "/users/" + parsed[1]).Result;
+			var response = _httpClient.GetAsync(_httpAddress + "/users/" + parsed[1]).Result;
 
 			if (response.StatusCode == System.Net.HttpStatusCode.OK)
 			{
@@ -94,7 +97,7 @@ namespace WebSocketsChat.Client
 				return;
 			}
 
-			var response = _httpClient.DeleteAsync(_server + "/messages/" + parsed[1]).Result;
+			var response = _httpClient.DeleteAsync(_httpAddress + "/messages/" + parsed[1]).Result;
 
 			if (response.StatusCode != System.Net.HttpStatusCode.NoContent)
 			{
@@ -109,7 +112,7 @@ namespace WebSocketsChat.Client
 		private Task<HttpResponseMessage> PostTo<T>(string url, T content)
 		{
 			HttpContent httpContent = new StringContent(JsonConvert.SerializeObject(content), Encoding.UTF8, "application/json");
-			return _httpClient.PostAsync(_server + url, httpContent);
+			return _httpClient.PostAsync(_httpAddress + url, httpContent);
 		}
 
 		private void HandleMessage(byte[] bytes, int receiveLen)
@@ -130,21 +133,27 @@ namespace WebSocketsChat.Client
 					break;
 
 				case (byte)WebSocketJsonType.User:
-					_users = JsonConvert.DeserializeObject<IEnumerable<User>>(data);
-					
+					_users.Add(JsonConvert.DeserializeObject<User>(data));
+					ListUsers();
 					break;
+
+				case (byte)WebSocketJsonType.Users:
+					_users = JsonConvert.DeserializeObject<List<User>>(data);
+					ListUsers();
+					break;
+
 				default:
 					var deleted = JsonConvert.DeserializeObject<DeletedItem>(data);
-					switch (deleted.Item)
+
+					if (deleted.Type == WebSocketJsonType.User)
 					{
-						case Message m:
-							_messages.Remove(m);
-							ShowMessages(true);
-							break;
-						case User u:
-							_users.First(user => user.Equals(u)).Online = false;
-							ListUsers();
-							break;
+						_users.First(deleted.Item.Equals).Online = false;
+						ListUsers();
+					}
+					else
+					{
+						_messages.Remove(_messages.First(deleted.Item.Equals));
+						ShowMessages(true);
 					}
 					break;
 			}
@@ -159,16 +168,16 @@ namespace WebSocketsChat.Client
 				if (resp != null)
 					Console.Write("Sorry, user with this nickname is already exists. \nPlease, choose another one: ");
 				LoginRequest loginRequest = new LoginRequest { Username = Console.ReadLine() };
+				
 				resp = PostTo("/login", loginRequest).Result;
-
+				
 			} while (resp.StatusCode != System.Net.HttpStatusCode.OK);
 
 			var login = JsonConvert.DeserializeObject<LoginResponse>(resp.Content.ReadAsStringAsync().Result);
-			_users = new[] { login };
 
 			_httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
 
-			resp = _httpClient.GetAsync(_server + "/messages?count=30&end=true").Result;
+			resp = _httpClient.GetAsync(_httpAddress + "/messages?count=30&end=true").Result;
 			_messages = JsonConvert.DeserializeObject<List<Message>>(resp.Content.ReadAsStringAsync().Result);
 			ShowMessages(false);
 
@@ -185,10 +194,15 @@ namespace WebSocketsChat.Client
 
 				var login = LogIn();
 
-				webSocket.ConnectAsync(new Uri($"ws://localhost:8888/subscribe?token={login.Token}"), CancellationToken.None).Wait();
+				webSocket.ConnectAsync(new Uri($"ws://{_server}/subscribe?token={login.Token}"), CancellationToken.None).Wait();
 				var bytes = new byte[2048];
+				var byteSegment = new ArraySegment<byte>(bytes);
 
-				Task<WebSocketReceiveResult> webSocketResult = webSocket.ReceiveAsync(new ArraySegment<byte>(bytes), CancellationToken.None);
+
+				Task<WebSocketReceiveResult> webSocketResult = webSocket.ReceiveAsync(byteSegment, CancellationToken.None);
+				webSocketResult.Wait();
+				HandleMessage(bytes, webSocketResult.Result.Count);
+				webSocketResult = webSocket.ReceiveAsync(byteSegment, CancellationToken.None);
 
 				Task<string> getLine = GetLineAsync();
 
@@ -218,13 +232,13 @@ namespace WebSocketsChat.Client
 					if (webSocketResult.IsCompleted)
 					{
 						HandleMessage(bytes, webSocketResult.Result.Count);
-						webSocketResult = webSocket.ReceiveAsync(new ArraySegment<byte>(bytes), CancellationToken.None);
+						webSocketResult = webSocket.ReceiveAsync(byteSegment, CancellationToken.None);
 					}
 
 					Thread.Sleep(500);
 				}
 
-				httpClient.PostAsync(_server + "/logout", new StringContent("")).Wait();
+				httpClient.PostAsync(_httpAddress + "/logout", new StringContent("")).Wait();
 				webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "logout", CancellationToken.None);
 			}
 		}
@@ -233,11 +247,29 @@ namespace WebSocketsChat.Client
 		{
 			if (args.Length < 1)
 			{
-				Console.WriteLine("Usage: <server address>");
+				Console.WriteLine("Usage: <server address> <port>");
 				return;
 			}
-			var client = new Client(args[0]);
-			client.Run();
+			if (args.Length != 2 || !int.TryParse(args[1], out int port))
+			{
+				port = 8888;
+			}
+			var client = new Client(args[0], port);
+
+			try
+			{
+				client.Run();
+			}
+			catch (AggregateException e)
+			{
+				Console.WriteLine("Network error occured: " + e.Message);
+			}
+			catch (Exception e)
+			{
+				Console.WriteLine("Error occured: " + e.Message);
+			}
+
+			Console.WriteLine("Finishing program");
 		}
 	}
 }
