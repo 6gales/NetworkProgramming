@@ -2,6 +2,8 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include <stdexcept>
 #include "InetUtils.h"
 
@@ -29,10 +31,10 @@ ServerSocket::ServerSocket(int port) : sockfd(socket(AF_INET, SOCK_STREAM, 0))
 	{
 		throw std::runtime_error(std::string("listen: ") + strerror(errno));
 	}
-	// if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL, 0) | O_NONBLOCK) == -1)
-	// {
-	// 	throw std::runtime_error("fcnt: cannot make server socket nonblock");
-	// }
+	if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL, 0) | O_NONBLOCK) == -1)
+	{
+		throw std::runtime_error("fcnt: cannot make server socket nonblock");
+	}
 }
 
 int ServerSocket::acceptConnection() const
@@ -44,6 +46,6 @@ int ServerSocket::acceptConnection() const
 	{
 		throw std::runtime_error(std::string("accept: ") + strerror(errno));
 	}
-	//fcntl(clientSock, F_SETFL, fcntl(clientSock, F_GETFL, 0) | O_NONBLOCK);
+	fcntl(clientSock, F_SETFL, fcntl(clientSock, F_GETFL, 0) | O_NONBLOCK);
 	return clientSock;
 }

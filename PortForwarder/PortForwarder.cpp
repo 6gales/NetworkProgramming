@@ -2,77 +2,67 @@
 #include <stdexcept>
 #include <iostream>
 #include <algorithm>
+#include <string.h>
 #include "InetUtils.h"
 
 PortForwarder::PortForwarder(int lport, std::string rhost, int rport) : servSock(lport)
 {
 	redirectAddr = getAddr(rhost, rport);
+	maxfd = servSock.getFd();
 }
 
 void PortForwarder::run()
 {
 	std::cerr << "Forwarder started" << std::endl;
-	constexpr int buffSize = 4096;
-		char clientBuffer[buffSize],
-			servBuffer[buffSize];
+
+	bool removedAny = false;
+
 	while (true)
 	{
-		int clientSock = servSock.acceptConnection(),
-			redirectedSock = openRedirectedSocket();
-
-		int maxfd = std::max(clientSock, redirectedSock);
-		std::cerr << "Client connected" << std::endl;
-		bool clientEof = false,
-			serverEof = false;
-		
-    	fd_set rdfds;
-	    fd_set wrfds;
-
-		while (!(clientEof && serverEof))
+		FD_ZERO(&readfs);
+		FD_ZERO(&writefs);
+		FD_SET(servSock.getFd(), &readfs);
+		for (std::list<Connection>::iterator it = conns.begin(); it != conns.end(); ++it)
 		{
-
-			FD_ZERO(&rdfds);
-			FD_ZERO(&wrfds);
-			FD_SET(clientSock, &rdfds);
-			FD_SET(clientSock, &wrfds);
-			FD_SET(redirectedSock, &rdfds);
-			FD_SET(redirectedSock, &wrfds);
-			
-			struct timeval tv;
-			tv.tv_sec = 5;
-			tv.tv_usec = 0;
-			int selected = select(maxfd + 1, &rdfds, &wrfds, NULL, &tv);
-			if (selected == 0)
-				continue;
-
-			if (!clientEof && FD_ISSET(clientSock, &rdfds))
-			{
-				int bytesRead = read(clientSock, clientBuffer, buffSize);
-				if (bytesRead == 0)
-				{
-					clientEof = true;
-				}
-				else
-				{
-					write(redirectedSock, clientBuffer, bytesRead);
-				}
-				std::cerr << "Read " << bytesRead << " from client" << std::endl;
-			}
-			if (!serverEof && FD_ISSET(redirectedSock, &wrfds))
-			{
-				int bytesRead = read(redirectedSock, servBuffer, buffSize);
-				if (bytesRead == 0)
-				{
-					serverEof = true;
-				}
-				else
-				{
-					write(clientSock, servBuffer, bytesRead);
-				}
-				std::cerr << "Read " << bytesRead << " from server" << std::endl;
-			}
-
+			it->setFds(&readfs, &writefs);
 		}
+			
+		int selected = select(maxfd + 1, &readfs, &writefs, NULL, NULL);
+		if (selected < 0)
+		{
+			throw std::runtime_error(std::string("select: ") + strerror(errno));
+		}
+		if (selected == 0)
+			continue;
+		
+		if (FD_ISSET(servSock.getFd(), &readfs))
+		{
+			int clientSock = servSock.acceptConnection();
+			int coupledSock = openRedirectedSocket();
+			conns.emplace_back(clientSock, coupledSock);
+			conns.emplace_back(coupledSock, clientSock);
+			maxfd = std::max(maxfd, std::max(clientSock, coupledSock));
+		}
+
+		for (std::list<Connection>::iterator it = conns.begin(); it != conns.end(); ++it)
+		{
+			it->proccessConnection(&readfs, &writefs);
+			if (!it->isActive())
+			{
+				std::list<Connection>::iterator backup = it--;
+				conns.erase(backup);
+				removedAny = true;
+			}
+		}
+
+		if (removedAny)
+		{
+			maxfd = std::max(servSock.getFd(), std::max_element(conns.begin(), conns.end(), [](Connection a, Connection b) -> bool
+			{
+				return a.getFd() < b.getFd();
+			})->getFd());
+		}
+
 	}
 }
 
