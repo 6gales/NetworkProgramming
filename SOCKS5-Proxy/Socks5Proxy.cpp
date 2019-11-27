@@ -42,14 +42,17 @@ void Socks5Proxy::run()
 
 		for (std::list<Socks5Connection>::iterator it = handshakingConns.begin(); it != handshakingConns.end(); ++it)
 		{
-			if (fd_is_valid(it->getFd()))
-				it->setFds(&readfs, &writefs);
+			it->setFds(&readfs, &writefs);
+		}
+
+		for (auto it = resolvingConns.begin(); it != resolvingConns.end(); ++it)
+		{
+			it->second->setFds(readfs, writefs);
 		}
 
 		for (std::list<Connection>::iterator it = proccessingConns.begin(); it != proccessingConns.end(); ++it)
 		{
-			if (fd_is_valid(it->getFd()))
-				it->setFds(&readfs, &writefs);
+			it->setFds(&readfs, &writefs);
 		}
 
 		int selected = select(maxfd + 1, &readfs, &writefs, NULL, NULL);
@@ -73,7 +76,7 @@ void Socks5Proxy::run()
 			//if (!it->isActive())
 			if (it->isSuccseed())
 			{
-//				if (it->isSuccseed())
+				if (!it->isDomain())
 				{
 					int coupledSock = openRedirectedSocket(it->getAddr(), it->redirectedPort());
 					FD_CLR(it->getFd(), &readfs);
@@ -81,12 +84,54 @@ void Socks5Proxy::run()
 					proccessingConns.emplace_back(it->getFd(), coupledSock);
 					proccessingConns.emplace_back(coupledSock, it->getFd());
 				}
+				else
+				{
+					std::pair<int, int> fdPort{ it->getFd(), it->redirectedPort() };
+					resolvingConns.emplace_back(fdPort, new DnsResolver((unsigned char *) it->getAddr().c_str()));
+				}
 
 				std::list<Socks5Connection>::iterator backup = it--;
 				handshakingConns.erase(backup);
 				removedAny = true;
 			}
 		}
+
+		for (auto it = resolvingConns.begin(); it != resolvingConns.end(); ++it)
+		{
+			if (it->second->exchange_data(readfs, writefs))
+			{
+				fprintf(stderr, "Resolved domain\n");
+
+				struct sockaddr_in addr;
+				memset(&addr, 0, sizeof(addr));
+				addr.sin_addr.s_addr = it->second->getaddr();
+				addr.sin_port = htons(it->first.second);
+				addr.sin_family = AF_INET;
+
+				int sock = socket(AF_INET, SOCK_STREAM, 0);
+				if (sock == -1 || connect(sock, (struct sockaddr*)&addr, sizeof(addr)))
+				{
+					throw std::runtime_error("redirecting failed");
+				}
+
+				proccessingConns.emplace_back(it->first.first, sock);
+				proccessingConns.emplace_back(sock, it->first.first);
+
+
+				maxfd = std::max(maxfd, sock);
+				delete(it->second);
+				resolvingConns.erase(it++);
+			}
+			else
+			{
+				fprintf(stderr, "Domain not resolved\n");
+
+				maxfd = std::max(maxfd, it->second->getFd());
+				it++;
+			}
+
+		}
+
 
 		for (std::list<Connection>::iterator it = proccessingConns.begin(); it != proccessingConns.end(); ++it)
 		{

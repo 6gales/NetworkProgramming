@@ -5,6 +5,7 @@
 #include <list>
 #include "ServerSocket.h"
 #include "Connection.h"
+#include "DnsResolver.h"
 #include "Socks5Connection.h"
 
 class Socks5Proxy
@@ -14,6 +15,7 @@ class Socks5Proxy
 		writefs;
 	int maxfd;
 	std::list<Socks5Connection> handshakingConns;
+	std::list<std::pair<std::pair<int, int>, DnsResolver*>> resolvingConns;
 	std::list<Connection> proccessingConns;
 
 	int openRedirectedSocket(std::string addr, int port);

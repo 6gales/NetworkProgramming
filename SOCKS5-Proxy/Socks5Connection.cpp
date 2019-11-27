@@ -58,6 +58,10 @@ bool Socks5Connection::proccessData()
 	}
 
 	sendBuffer[1] = (connectCommand != recvBuffer[1] ? commandNotSupported : accepted);
+	if (connectCommand != recvBuffer[1])
+		fprintf(stderr, "Command not supported\n");
+
+
 	sendBuffer[2] = reserved;
 
 	switch (recvBuffer[3])
@@ -68,6 +72,7 @@ bool Socks5Connection::proccessData()
 					std::to_string(recvBuffer[6]) + '.' + std::to_string(recvBuffer[7]);
 			((unsigned char *) &port)[1] = recvBuffer[8];
 			((unsigned char *) &port)[0] = recvBuffer[9];
+			fprintf(stderr, "IPv4 here: %s:%d\n", addr.c_str(), port);
 			break;
 		
 		case domainName:
@@ -86,10 +91,11 @@ bool Socks5Connection::proccessData()
 
 			((unsigned char *) &port)[1] = recvBuffer[len + 5];
 			((unsigned char *) &port)[0] = recvBuffer[len + 6];
-			fprintf(stderr, "Domain here: %s:%d", addr.c_str(), port);
+			fprintf(stderr, "Domain here: %s:%d\n", addr.c_str(), port);
 			break;
 		}
 		default:
+			fprintf(stderr, "Address not supported\n");
 			sendBuffer[1] = addressNotSupported;
 	}
 	
@@ -135,6 +141,10 @@ bool Socks5Connection::performFirstStage()
 			success = true;
 		}
 	}
+
+	if (noAcceptableMethods == sendBuffer[1])
+		fprintf(stderr, "No acceptable authorization methods\n");
+
 
 	recvOffset = 0;
 	needWrite = true;

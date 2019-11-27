@@ -5,7 +5,7 @@
 
 class Socks5Connection
 {
-	static constexpr char
+	static constexpr unsigned char
 		socksVersion        = 0x05,
 		accepted            = 0x00,
 		reserved            = 0x00,
@@ -48,6 +48,11 @@ public:
 	bool isActive()
 	{
 		return !eof || initialStage || needWrite;
+	}
+
+	bool isDomain()
+	{
+		return domain;
 	}
 
 	bool isSuccseed()
