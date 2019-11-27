@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <cstdio>
 
 class Connection
 {
@@ -49,6 +50,7 @@ public:
 
 	virtual ~Connection()
 	{
+		fprintf(stderr, "connection closing: %d\n", connSockfd);
 		close(connSockfd);
 	}
 };

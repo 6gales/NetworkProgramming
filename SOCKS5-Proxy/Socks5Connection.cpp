@@ -21,7 +21,7 @@ void Socks5Connection::proccessConnection(fd_set *readfds, fd_set *writefds)
 
 	if (FD_ISSET(clientFd, writefds) && needWrite)
 	{
-		int bytesWrote = send(clientFd, recvBuffer + sendOffset, sendSize, 0);
+		int bytesWrote = send(clientFd, sendBuffer + sendOffset, sendSize, 0);
 		if (-1 == bytesWrote)
 		{
 			return;
@@ -86,6 +86,7 @@ bool Socks5Connection::proccessData()
 
 			((unsigned char *) &port)[1] = recvBuffer[len + 5];
 			((unsigned char *) &port)[0] = recvBuffer[len + 6];
+			fprintf(stderr, "Domain here: %s:%d", addr.c_str(), port);
 			break;
 		}
 		default:
@@ -100,9 +101,11 @@ bool Socks5Connection::proccessData()
 	sendBuffer[7] = 1;
 
 	//port
-	sendBuffer[8] = 0;//((unsigned char *) &port)[0];
-	sendBuffer[9] = 0;//((unsigned char *) &port)[1];
+	sendBuffer[8] = 0;//((unsigned char *) &rPort)[0];
+	sendBuffer[9] = 0;//((unsigned char *) &rPort)[1];
 
+	succseed = true;
+	sendSize = 10;
 	needWrite = true;
 	return true;
 }
@@ -133,6 +136,7 @@ bool Socks5Connection::performFirstStage()
 		}
 	}
 
+	recvOffset = 0;
 	needWrite = true;
 	initialStage = false;
 	return success;

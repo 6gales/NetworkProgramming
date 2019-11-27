@@ -19,7 +19,7 @@ class Socks5Connection
 
 
 	constexpr static size_t BUFF_SIZE = 1024;
-	char sendBuffer[BUFF_SIZE],
+	unsigned char sendBuffer[BUFF_SIZE],
 		recvBuffer[BUFF_SIZE];
 
 	bool initialStage = true,
@@ -47,7 +47,7 @@ public:
 
 	bool isActive()
 	{
-		return eof && !initialStage && !needWrite;
+		return !eof || initialStage || needWrite;
 	}
 
 	bool isSuccseed()
@@ -83,6 +83,7 @@ public:
 	{
 		if (!succseed)
 		{
+			fprintf(stderr, "closing %d\n", clientFd);
 			close(clientFd);
 		}
 	}

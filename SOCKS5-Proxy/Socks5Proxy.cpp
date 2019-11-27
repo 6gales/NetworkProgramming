@@ -3,6 +3,7 @@
 #include <iostream>
 #include <algorithm>
 #include <string.h>
+#include <fcntl.h>
 #include "InetUtils.h"
 
 Socks5Proxy::Socks5Proxy(int lport) : servSock(lport)
@@ -15,13 +16,21 @@ void Socks5Proxy::run()
 	std::cerr << "Forwarder started" << std::endl;
 
 	bool removedAny = false;
-	auto connectionComparator = [](Connection a, Connection b) -> bool
+	auto fd_is_valid = [](int fd) -> int
 	{
+		return fcntl(fd, F_GETFD) != -1 || errno != EBADF;
+	};
+	auto connectionComparator = [&fd_is_valid](Connection a, Connection b) -> bool
+	{
+		fprintf(stderr, "%d is valid: %d, %d is valid: %d\n",
+				a.getFd(), fd_is_valid(a.getFd()), b.getFd(), fd_is_valid(b.getFd()));
 		return a.getFd() < b.getFd();
 	};
 
-	auto socks5ConnComparator = [](Socks5Connection a, Socks5Connection b) -> bool
+	auto socks5ConnComparator = [&fd_is_valid](Socks5Connection a, Socks5Connection b) -> bool
 	{
+		fprintf(stderr, "%d is valid: %d, %d is valid: %d\n",
+				a.getFd(), fd_is_valid(a.getFd()), b.getFd(), fd_is_valid(b.getFd()));
 		return a.getFd() < b.getFd();
 	};
 
@@ -33,13 +42,16 @@ void Socks5Proxy::run()
 
 		for (std::list<Socks5Connection>::iterator it = handshakingConns.begin(); it != handshakingConns.end(); ++it)
 		{
-			it->setFds(&readfs, &writefs);
+			if (fd_is_valid(it->getFd()))
+				it->setFds(&readfs, &writefs);
 		}
+
 		for (std::list<Connection>::iterator it = proccessingConns.begin(); it != proccessingConns.end(); ++it)
 		{
-			it->setFds(&readfs, &writefs);
+			if (fd_is_valid(it->getFd()))
+				it->setFds(&readfs, &writefs);
 		}
-			
+
 		int selected = select(maxfd + 1, &readfs, &writefs, NULL, NULL);
 		if (selected < 0)
 		{
@@ -58,11 +70,14 @@ void Socks5Proxy::run()
 		for (std::list<Socks5Connection>::iterator it = handshakingConns.begin(); it != handshakingConns.end(); ++it)
 		{
 			it->proccessConnection(&readfs, &writefs);
-			if (!it->isActive())
+			//if (!it->isActive())
+			if (it->isSuccseed())
 			{
-				if (it->isSuccseed())
+//				if (it->isSuccseed())
 				{
 					int coupledSock = openRedirectedSocket(it->getAddr(), it->redirectedPort());
+					FD_CLR(it->getFd(), &readfs);
+					FD_CLR(it->getFd(), &writefs);
 					proccessingConns.emplace_back(it->getFd(), coupledSock);
 					proccessingConns.emplace_back(coupledSock, it->getFd());
 				}
@@ -87,10 +102,43 @@ void Socks5Proxy::run()
 		if (removedAny)
 		{
 			maxfd = servSock.getFd();
-			int listsMax = std::max(
-				std::max_element(proccessingConns.begin(), proccessingConns.end(), connectionComparator)->getFd(),
-				std::max_element(handshakingConns.begin(), handshakingConns.end(), socks5ConnComparator)->getFd()
-			);
+
+//			auto maxP = std::max_element(proccessingConns.begin(), proccessingConns.end(), connectionComparator);
+//			auto maxH = std::max_element(handshakingConns.begin(), handshakingConns.end(), socks5ConnComparator);
+
+			int listsMax = -1;
+//			if (maxP != proccessingConns.end() && maxH != handshakingConns.end())
+//			{
+//				listsMax = std::max(
+//						maxP->getFd(),
+//						maxH->getFd()
+//				);
+//			}
+//			else if (maxP != proccessingConns.end())
+//			{
+//				listsMax = maxP->getFd();
+//			}
+//			else if (maxH != handshakingConns.end())
+//			{
+//				listsMax = maxH->getFd();
+//			}
+
+			for (std::list<Socks5Connection>::iterator it = handshakingConns.begin(); it != handshakingConns.end(); ++it)
+			{
+				if (it->getFd() > listsMax)
+				{
+					listsMax = it->getFd();
+				}
+			}
+
+			for (std::list<Connection>::iterator it = proccessingConns.begin(); it != proccessingConns.end(); ++it)
+			{
+				if (it->getFd() > listsMax)
+				{
+					listsMax = it->getFd();
+				}
+			}
+
 			maxfd = std::max(listsMax, maxfd);
 		}
 
