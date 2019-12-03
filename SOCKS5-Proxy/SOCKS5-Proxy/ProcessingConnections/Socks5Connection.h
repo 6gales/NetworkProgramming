@@ -1,9 +1,11 @@
+#pragma once
+
 #include <string>
 #include <unistd.h>
 #include <sys/types.h>
-#include <sys/socket.h>
+#include "../Socks5Context.h"
 
-class Socks5Connection
+class Socks5Connection : public Socks5Context::ProcessingState
 {
 	static constexpr unsigned char
 		socksVersion        = 0x05,
@@ -18,7 +20,7 @@ class Socks5Connection
 		addressNotSupported = 0x08;
 
 
-	constexpr static size_t BUFF_SIZE = 1024;
+	constexpr static std::size_t BUFF_SIZE = 1024;
 	unsigned char sendBuffer[BUFF_SIZE],
 		recvBuffer[BUFF_SIZE];
 
@@ -26,69 +28,29 @@ class Socks5Connection
 		needWrite = false,
 		eof = false,
 		domain = false,
-		succseed = false;
+		succeed = false;
 	
 	std::string addr;
 	
-	int sendOffset = 0,
+	size_t sendOffset = 0,
 		recvOffset = 0,
-		sendSize = 0,
-		port = 0;
+		sendSize = 0;
+	int port = 0;
 
 	const int clientFd;
 
 	bool performFirstStage();
-	bool proccessData();
+	bool negotiate();
 
 public:
 	Socks5Connection(int _clientFd) : clientFd(_clientFd) {}
 
-	void proccessConnection(fd_set *readfds, fd_set *writefds);
-
-	bool isActive()
-	{
-		return !eof || initialStage || needWrite;
-	}
-
-	bool isDomain()
-	{
-		return domain;
-	}
-
-	bool isSuccseed()
-	{
-		return succseed;
-	}
-
-	int getFd()
-	{
-		return clientFd;
-	}
-
-	std::string getAddr()
-	{
-		return addr;
-	}
-
-	int redirectedPort()
-	{
-		return port;
-	}
-
-	void setFds(fd_set *readfds, fd_set *writefds)
-	{
-		if (!eof)
-		{
-			FD_SET(clientFd, readfds);
-		}
-		FD_SET(clientFd, writefds); 
-	}
+	ProcessingState* process(Socks5Context* context) override;
 
 	~Socks5Connection()
 	{
-		if (!succseed)
+		if (!succeed)
 		{
-			fprintf(stderr, "closing %d\n", clientFd);
 			close(clientFd);
 		}
 	}

@@ -1,10 +1,18 @@
 #include "Socks5Connection.h"
+#include <netinet/in.h>
+#include "DnsResolver.h"
+#include "EstablishedConnection.h"
+#include "../InetUtils.h"
 
-void Socks5Connection::proccessConnection(fd_set *readfds, fd_set *writefds)
+Socks5Context::ProcessingState* Socks5Connection::process(Socks5Context *context)
 {
-	if (FD_ISSET(clientFd, readfds) && !eof)
+	if (context->getRegistrar().isSetRead(clientFd) && !eof)
 	{
-		int bytesRead = recv(clientFd, recvBuffer + recvOffset, BUFF_SIZE - recvOffset, 0);
+		ssize_t bytesRead = recv(clientFd, recvBuffer + recvOffset, BUFF_SIZE - recvOffset, 0);
+		if (bytesRead < 0)
+		{
+			throw std::runtime_error(std::string("recv: ") + strerror(errno));
+		}
 		if (0 == bytesRead)
 		{
 			eof = true;
@@ -12,19 +20,21 @@ void Socks5Connection::proccessConnection(fd_set *readfds, fd_set *writefds)
 		recvOffset += bytesRead;
 	}
 
-	if (!proccessData())
+	if (!negotiate())
 	{
 		eof = true;
 		initialStage = false;
-		succseed = false;
+		succeed = false;
+		context->finish();
+		return nullptr;
 	}
 
-	if (FD_ISSET(clientFd, writefds) && needWrite)
+	if (context->getRegistrar().isSetWrite(clientFd) && needWrite)
 	{
-		int bytesWrote = send(clientFd, sendBuffer + sendOffset, sendSize, 0);
+		ssize_t bytesWrote = send(clientFd, sendBuffer + sendOffset, sendSize, 0);
 		if (-1 == bytesWrote)
 		{
-			return;
+			throw std::runtime_error(std::string("send: ") + strerror(errno));
 		}
 
 		sendOffset += bytesWrote;
@@ -35,9 +45,28 @@ void Socks5Connection::proccessConnection(fd_set *readfds, fd_set *writefds)
 			sendSize = 0;
 		}
 	}
+
+	if (succeed)
+	{
+		if (domain)
+		{
+			return new DnsResolver(clientFd, addr, port);
+		}
+
+		int servFd = openRedirectedSocket(getAddr(addr, port));
+
+		context->getRegistrar().registerFd(clientFd);
+		context->getRegistrar().registerFd(servFd);
+
+		return new EstablishedConnection(clientFd, servFd);
+	}
+	
+	context->getRegistrar().registerFd(clientFd);
+
+	return nullptr;
 }
 
-bool Socks5Connection::proccessData()
+bool Socks5Connection::negotiate()
 {
 	//min for first and second negotiation stage
 	if (recvOffset < (initialStage ? 2 : 10))
@@ -70,15 +99,15 @@ bool Socks5Connection::proccessData()
 			domain = false;
 			addr += std::to_string(recvBuffer[4]) + '.' + std::to_string(recvBuffer[5]) + '.' +
 					std::to_string(recvBuffer[6]) + '.' + std::to_string(recvBuffer[7]);
-			((unsigned char *) &port)[1] = recvBuffer[8];
-			((unsigned char *) &port)[0] = recvBuffer[9];
+			reinterpret_cast<unsigned char *>(&port)[1] = recvBuffer[8];
+			reinterpret_cast<unsigned char *>(&port)[0] = recvBuffer[9];
 			fprintf(stderr, "IPv4 here: %s:%d\n", addr.c_str(), port);
 			break;
 		
 		case domainName:
 		{
 			domain = true;
-			char len = recvBuffer[4];
+			const unsigned char len = recvBuffer[4];
 			if (recvOffset < len + 7)
 			{
 				return true;
@@ -89,8 +118,8 @@ bool Socks5Connection::proccessData()
 				addr.push_back(recvBuffer[i + 5]);
 			}
 
-			((unsigned char *) &port)[1] = recvBuffer[len + 5];
-			((unsigned char *) &port)[0] = recvBuffer[len + 6];
+			reinterpret_cast<unsigned char *>(&port)[1] = recvBuffer[len + 5];
+			reinterpret_cast<unsigned char *>(&port)[0] = recvBuffer[len + 6];
 			fprintf(stderr, "Domain here: %s:%d\n", addr.c_str(), port);
 			break;
 		}
@@ -110,7 +139,7 @@ bool Socks5Connection::proccessData()
 	sendBuffer[8] = 0;//((unsigned char *) &rPort)[0];
 	sendBuffer[9] = 0;//((unsigned char *) &rPort)[1];
 
-	succseed = true;
+	succeed = true;
 	sendSize = 10;
 	needWrite = true;
 	return true;
@@ -123,7 +152,7 @@ bool Socks5Connection::performFirstStage()
 		return false;
 	}
 
-	char authMethods = recvBuffer[1];
+	const unsigned char authMethods = recvBuffer[1];
 	if (authMethods + 2 > recvOffset)
 	{
 		return true;
@@ -133,7 +162,7 @@ bool Socks5Connection::performFirstStage()
 	bool success = false;
 	sendSize = 2;
 
-	for (char i = 2; i < authMethods + 2; i++)
+	for (unsigned char i = 2; i < authMethods + 2; i++)
 	{
 		if (noAuthentication == recvBuffer[i])
 		{
