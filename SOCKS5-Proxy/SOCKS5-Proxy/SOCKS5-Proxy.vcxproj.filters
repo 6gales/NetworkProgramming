@@ -1,0 +1,40 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="InetUtils.cpp" />
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="ServerSocket.cpp" />
+    <ClCompile Include="Socks5Proxy.cpp" />
+    <ClCompile Include="Socks5Context.cpp" />
+    <ClCompile Include="ProcessingConnections\DnsResolver.cpp">
+      <Filter>ProcessingConnections</Filter>
+    </ClCompile>
+    <ClCompile Include="ProcessingConnections\EstablishedConnection.cpp">
+      <Filter>ProcessingConnections</Filter>
+    </ClCompile>
+    <ClCompile Include="ProcessingConnections\Socks5Connection.cpp">
+      <Filter>ProcessingConnections</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="InetUtils.h" />
+    <ClInclude Include="ServerSocket.h" />
+    <ClInclude Include="Socks5Proxy.h" />
+    <ClInclude Include="FdRegistrar.hpp" />
+    <ClInclude Include="Socks5Context.h" />
+    <ClInclude Include="ProcessingConnections\DnsResolver.h">
+      <Filter>ProcessingConnections</Filter>
+    </ClInclude>
+    <ClInclude Include="ProcessingConnections\EstablishedConnection.h">
+      <Filter>ProcessingConnections</Filter>
+    </ClInclude>
+    <ClInclude Include="ProcessingConnections\Socks5Connection.h">
+      <Filter>ProcessingConnections</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="ProcessingConnections">
+      <UniqueIdentifier>{0930f11b-6738-41b7-9bdd-0bcc2f7781f3}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

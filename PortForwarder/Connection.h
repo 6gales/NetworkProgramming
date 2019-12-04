@@ -7,8 +7,7 @@
 class Connection
 {
 	constexpr static size_t BUFF_SIZE = 4096;
-	char sendBuffer[BUFF_SIZE],
-		recvBuffer[BUFF_SIZE];
+	char recvBuffer[BUFF_SIZE];
 
 	const int connSockfd,
 		coupledSockfd;
